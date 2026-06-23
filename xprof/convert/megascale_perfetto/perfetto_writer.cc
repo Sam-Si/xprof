@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <variant>
+#include <vector>
 
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
@@ -22,6 +24,7 @@
 #ifndef PLATFORM_WINDOWS
 #include "google/protobuf/io/gzip_stream.h"
 #endif
+#include "google/protobuf/arena.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 #include "xprof/convert/megascale_perfetto/xprof_trace.h"
 
@@ -88,25 +91,54 @@ class WriterContext {
 
   void WriteCounters() {
     if (ir_.rx_counter.values.empty() && ir_.tx_counter.values.empty() &&
-        ir_.rx_bw_counter.values.empty() && ir_.tx_bw_counter.values.empty()) {
+        ir_.rx_bw_counter.values.empty() && ir_.tx_bw_counter.values.empty() &&
+        ir_.inflight_collective_count.values.empty() &&
+        ir_.inflight_collective_bytes.values.empty()) {
       return;
     }
-    uint64_t parent_uuid =
-        WriteTrackDescriptor(next_track_uuid_++, "1. Network",
+    uint64_t global_counters_uuid =
+        WriteTrackDescriptor(next_track_uuid_++, "1. Global Counters",
                              /*parent_uuid=*/0);
-    if (!ir_.rx_counter.values.empty()) {
-      WriteCounterTrack(ir_.rx_counter, parent_uuid, "bytes",
-                        "outstanding_bytes");
+
+    // Network counters
+    if (!ir_.rx_counter.values.empty() || !ir_.tx_counter.values.empty() ||
+        !ir_.rx_bw_counter.values.empty() ||
+        !ir_.tx_bw_counter.values.empty()) {
+      uint64_t network_parent_uuid =
+          WriteTrackDescriptor(next_track_uuid_++, "Network",
+                               /*parent_uuid=*/global_counters_uuid);
+      if (!ir_.rx_counter.values.empty()) {
+        WriteCounterTrack(ir_.rx_counter, network_parent_uuid, "bytes",
+                          "outstanding_bytes");
+      }
+      if (!ir_.tx_counter.values.empty()) {
+        WriteCounterTrack(ir_.tx_counter, network_parent_uuid, "bytes",
+                          "outstanding_bytes");
+      }
+      if (!ir_.rx_bw_counter.values.empty()) {
+        WriteCounterTrack(ir_.rx_bw_counter, network_parent_uuid, "Gbps",
+                          "bandwidth");
+      }
+      if (!ir_.tx_bw_counter.values.empty()) {
+        WriteCounterTrack(ir_.tx_bw_counter, network_parent_uuid, "Gbps",
+                          "bandwidth");
+      }
     }
-    if (!ir_.tx_counter.values.empty()) {
-      WriteCounterTrack(ir_.tx_counter, parent_uuid, "bytes",
-                        "outstanding_bytes");
-    }
-    if (!ir_.rx_bw_counter.values.empty()) {
-      WriteCounterTrack(ir_.rx_bw_counter, parent_uuid, "Gbps", "bandwidth");
-    }
-    if (!ir_.tx_bw_counter.values.empty()) {
-      WriteCounterTrack(ir_.tx_bw_counter, parent_uuid, "Gbps", "bandwidth");
+
+    // Megascale counters
+    if (!ir_.inflight_collective_count.values.empty() ||
+        !ir_.inflight_collective_bytes.values.empty()) {
+      uint64_t megascale_parent_uuid =
+          WriteTrackDescriptor(next_track_uuid_++, "Megascale",
+                               /*parent_uuid=*/global_counters_uuid);
+      if (!ir_.inflight_collective_count.values.empty()) {
+        WriteCounterTrack(ir_.inflight_collective_count, megascale_parent_uuid,
+                          "count", "inflight_collectives");
+      }
+      if (!ir_.inflight_collective_bytes.values.empty()) {
+        WriteCounterTrack(ir_.inflight_collective_bytes, megascale_parent_uuid,
+                          "bytes", "inflight_collective_payload");
+      }
     }
   }
 
@@ -339,15 +371,18 @@ void Write(const XprofTrace& trace, Trace* out_proto) {
 absl::Status PerfettoWriter::WriteToCord(const XprofTrace& trace,
                                          absl::Cord* output,
                                          bool compressed_output) {
-  perfetto::protos::Trace trace_proto;
-  Write(trace, &trace_proto);
+  google::protobuf::Arena arena;
+  auto* trace_proto = google::protobuf::Arena::Create<perfetto::protos::Trace>(&arena);
+  Write(trace, trace_proto);
   if (compressed_output) {
 #ifdef PLATFORM_WINDOWS
     LOG(WARNING) << "Compression is not supported on Windows.";
 #else
     google::protobuf::io::CordOutputStream stream;
-    google::protobuf::io::GzipOutputStream gzip_stream(&stream);
-    if (!trace_proto.SerializeToZeroCopyStream(&gzip_stream) ||
+    google::protobuf::io::GzipOutputStream::Options options;
+    options.compression_level = 1;
+    google::protobuf::io::GzipOutputStream gzip_stream(&stream, options);
+    if (!trace_proto->SerializeToZeroCopyStream(&gzip_stream) ||
         !gzip_stream.Close()) {
       return absl::InternalError("Failed to serialize to gzip stream");
     }
@@ -355,31 +390,37 @@ absl::Status PerfettoWriter::WriteToCord(const XprofTrace& trace,
     return absl::OkStatus();
 #endif
   }
-  if (!trace_proto.AppendToString(output)) {
+  if (!trace_proto->AppendToString(output)) {
     return absl::InternalError("Failed to serialize to cord");
   }
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::string> PerfettoWriter::WriteToString(
-    const XprofTrace& trace, bool compressed_output) {
-  perfetto::protos::Trace trace_proto;
-  Write(trace, &trace_proto);
+absl::Status PerfettoWriter::WriteToString(const XprofTrace& trace,
+                                           std::string* output,
+                                           bool compressed_output) {
+  google::protobuf::Arena arena;
+  auto* trace_proto = google::protobuf::Arena::Create<perfetto::protos::Trace>(&arena);
+  Write(trace, trace_proto);
   if (compressed_output) {
 #ifdef PLATFORM_WINDOWS
     LOG(WARNING) << "Compression is not supported on Windows.";
 #else
-    std::string output;
-    google::protobuf::io::StringOutputStream stream(&output);
-    google::protobuf::io::GzipOutputStream gzip_stream(&stream);
-    if (!trace_proto.SerializeToZeroCopyStream(&gzip_stream) ||
+    google::protobuf::io::StringOutputStream stream(output);
+    google::protobuf::io::GzipOutputStream::Options options;
+    options.compression_level = 1;
+    google::protobuf::io::GzipOutputStream gzip_stream(&stream, options);
+    if (!trace_proto->SerializeToZeroCopyStream(&gzip_stream) ||
         !gzip_stream.Close()) {
       return absl::InternalError("Failed to serialize to gzip stream");
     }
-    return output;
+    return absl::OkStatus();
 #endif
   }
-  return trace_proto.SerializeAsString();
+  if (!trace_proto->SerializeToString(output)) {
+    return absl::InternalError("Failed to serialize to string");
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace xprof::megascale

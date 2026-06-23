@@ -1,4 +1,4 @@
-import {Component, OnDestroy} from '@angular/core';
+import {ChangeDetectionStrategy, Component, OnDestroy} from '@angular/core';
 import {ActivatedRoute} from '@angular/router';
 import {Store} from '@ngrx/store';
 import {Throbber} from 'org_xprof/frontend/app/common/classes/throbber';
@@ -13,6 +13,7 @@ import {takeUntil} from 'rxjs/operators';
 
 /** A megascale perfetto viewer component. */
 @Component({
+  changeDetection: ChangeDetectionStrategy.Default,
   standalone: false,
   selector: 'megascale-perfetto',
   templateUrl: './megascale_perfetto.ng.html',
@@ -29,6 +30,7 @@ export class MegascalePerfetto implements OnDestroy {
   protected perfettoUrl = `${this.perfettoOrigin}?hideSidebar=true`;
   sessionId = '';
   host = '';
+  groupTinyEvents = '';
   private initTimer: number | null = null;
   private pingTimer: number | null = null;
   private isLoading = false;
@@ -48,6 +50,7 @@ export class MegascalePerfetto implements OnDestroy {
         // across codebase to this.sessionId = params['sessionId'] ?? '';
         this.sessionId = (params || {})['sessionId'] || '';
         this.host = (queryParams || {})['host'] || '';
+        this.groupTinyEvents = (queryParams || {})['group_tiny_events'] || '';
         this.perfettoDataUrl = this.buildPerfettoDataURL();
         this.perfettoUrl = this.buildMegascalePerfettoUrl();
       });
@@ -67,7 +70,7 @@ export class MegascalePerfetto implements OnDestroy {
 
   async initPerfetto() {
     if (this.initTimer !== null) {
-      clearTimeout(this.initTimer);
+      window.clearTimeout(this.initTimer);
       this.initTimer = null;
     }
     // We cannot check perfettoWindow.document.readyState for megascale because of
@@ -100,14 +103,26 @@ export class MegascalePerfetto implements OnDestroy {
     );
     requestURL.searchParams.set('session_id', this.sessionId);
     requestURL.searchParams.set('perfetto', 'true');
+    requestURL.searchParams.set('tag', 'megascale_stats');
     if (this.host) {
       requestURL.searchParams.set('host', this.host);
+    }
+    if (this.groupTinyEvents !== '') {
+      requestURL.searchParams.set('group_tiny_events', this.groupTinyEvents);
     }
     return requestURL.toString();
   }
 
   async getDataAndOpenPerfettoUI() {
     if (!this.perfettoDataUrl) return;
+    if (!this.host) {
+      this.store.dispatch(
+        setErrorMessageStateAction({
+          errorMessage: 'A host must be specified.',
+        }),
+      );
+      return;
+    }
     const response = await fetch(this.perfettoDataUrl);
     if (response.ok) {
       const blob = await response.blob();
@@ -158,14 +173,14 @@ export class MegascalePerfetto implements OnDestroy {
       );
     };
     window.addEventListener('message', this.messageHandler);
-    this.pingTimer = setInterval(() => {
+    this.pingTimer = window.setInterval(() => {
       perfettoWindow.postMessage('PING', this.perfettoOrigin);
     }, 250);
   }
 
   private cleanupPing() {
     if (this.pingTimer !== null) {
-      clearInterval(this.pingTimer);
+      window.clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
     if (this.messageHandler) {
@@ -176,7 +191,7 @@ export class MegascalePerfetto implements OnDestroy {
 
   ngOnDestroy() {
     if (this.initTimer !== null) {
-      clearTimeout(this.initTimer);
+      window.clearTimeout(this.initTimer);
       this.initTimer = null;
     }
     this.cleanupPing();

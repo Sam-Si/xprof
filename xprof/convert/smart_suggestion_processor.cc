@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -41,12 +42,14 @@ limitations under the License.
 namespace xprof {
 namespace {
 
-using ::tensorflow::profiler::RegisterAllRules;
+using ::tensorflow::profiler::GetParam;
+using ::tensorflow::profiler::kAllHostsIdentifier;
 using ::tensorflow::profiler::SessionSnapshot;
 using ::tensorflow::profiler::SignalProvider;
 using ::tensorflow::profiler::SmartSuggestionEngine;
 using ::tensorflow::profiler::SmartSuggestionReport;
 using ::tensorflow::profiler::SmartSuggestionRuleFactory;
+using ::tensorflow::profiler::StoredDataType;
 using ::tensorflow::profiler::ToolDataProviderImpl;
 using ::tensorflow::profiler::ToolOptions;
 using ::tensorflow::profiler::XSpace;
@@ -77,16 +80,37 @@ absl::Status SmartSuggestionProcessor::Reduce(
 
 absl::Status SmartSuggestionProcessor::ProcessSession(
     const SessionSnapshot& session_snapshot, const ToolOptions& options) {
-  SmartSuggestionEngine engine;
-  SmartSuggestionRuleFactory rule_factory;
-  RegisterAllRules(&rule_factory);
+  bool refresh_suggestion = false;
+  if (auto refresh_str = GetParam<std::string>(options, "refresh_suggestion")) {
+    refresh_suggestion = (*refresh_str == "true" || *refresh_str == "1");
+  } else if (auto refresh_bool =
+                 GetParam<bool>(options, "refresh_suggestion")) {
+    refresh_suggestion = *refresh_bool;
+  } else if (auto refresh_int = GetParam<int>(options, "refresh_suggestion")) {
+    refresh_suggestion = (*refresh_int == 1);
+  }
 
-  auto tool_data_provider =
-      std::make_unique<ToolDataProviderImpl>(session_snapshot);
-  SignalProvider signal_provider(std::move(tool_data_provider));
+  SmartSuggestionReport report;
+  if (refresh_suggestion ||
+      !ReadBinaryProto(session_snapshot, StoredDataType::SMART_SUGGESTION,
+                       kAllHostsIdentifier, &report)
+           .ok()) {
+    SmartSuggestionEngine engine;
+    SmartSuggestionRuleFactory rule_factory;
+    RegisterAllRulesFor3P(&rule_factory);
 
-  TF_ASSIGN_OR_RETURN(SmartSuggestionReport report,
-                      engine.Run(signal_provider, rule_factory));
+    auto tool_data_provider =
+        std::make_unique<ToolDataProviderImpl>(session_snapshot);
+    SignalProvider signal_provider(std::move(tool_data_provider));
+
+    TF_ASSIGN_OR_RETURN(report, engine.Run(signal_provider, rule_factory));
+    absl::Status status =
+        WriteBinaryProto(session_snapshot, StoredDataType::SMART_SUGGESTION,
+                         kAllHostsIdentifier, report);
+    if (!status.ok()) {
+      LOG(WARNING) << "Failed to write smart suggestion cache: " << status;
+    }
+  }
 
   std::string json_output;
   tsl::protobuf::util::JsonPrintOptions opts;
@@ -95,12 +119,12 @@ absl::Status SmartSuggestionProcessor::ProcessSession(
       tsl::protobuf::util::MessageToJsonString(report, &json_output, opts);
   if (!encode_status.ok()) {
     const auto& error_message = encode_status.message();
-    return tsl::errors::Internal(
+    return absl::InternalError(absl::StrCat(
         "Could not convert smart suggestion report to json. Error: ",
-        absl::string_view(error_message.data(), error_message.length()));
+        error_message));
   }
 
-  data_ = json_output;
+  SetOutput(json_output, "application/json");
   return absl::OkStatus();
 }
 

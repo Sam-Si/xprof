@@ -15,8 +15,8 @@
 namespace traceviewer {
 
 // Type aliases for clarity
-using ProcessId = uint32_t;
-using ThreadId = uint32_t;
+using ProcessId = uint64_t;
+using ThreadId = uint64_t;
 // EventId is a unique identifier for an event.
 // Event timestamp, duration and its name are used to generate the event ID.
 // See http://shortn/_lVpPbx16ZS for more details.
@@ -36,8 +36,16 @@ enum class Phase : char {
   kComplete = 'X',
   kCounter = 'C',
   kMetadata = 'M',
-  kFlowStart = 'b',
-  kFlowEnd = 'e',
+  kAsyncBegin = 'b',
+  kAsyncEnd = 'e',
+  kFlowStart = 's',
+  kFlowEnd = 'f',
+  // Instant events use the 'i' phase. Historically, 'I' was also used.
+  // Since 'I' is deprecated, we use 'i' for default instant phase.
+  // See
+  // http://docs/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview?tab=t.0#heading=h.lenwiilchoxp
+  kInstant = 'i',
+  kInstantDeprecated = 'I',
 
   // Represents an unknown or unspecified event phase.
   // This makes the default state more explicit and type-safe.
@@ -62,6 +70,7 @@ struct TraceEvent {
   std::string id;
   tsl::profiler::ContextType category = tsl::profiler::ContextType::kGeneric;
   std::map<std::string, std::string> args;
+  bool is_async = false;
 };
 
 struct CounterEvent {
@@ -71,6 +80,12 @@ struct CounterEvent {
   std::vector<double> values;
   double min_value = std::numeric_limits<double>::infinity();
   double max_value = -std::numeric_limits<double>::infinity();
+};
+
+// Enum to represent the status of trace parsing.
+enum class ParsingStatus {
+  kSuccess = 0,
+  kFailed = 1,
 };
 
 struct ParsedTraceEvents {
@@ -84,6 +99,7 @@ struct ParsedTraceEvents {
   std::optional<std::pair<Milliseconds, Milliseconds>> visible_range_from_url;
 
   bool mpmd_pipeline_view = false;
+  ParsingStatus parsing_status = ParsingStatus::kSuccess;
 };
 
 // Constants for metadata events.
@@ -115,10 +131,13 @@ inline constexpr absl::string_view kComputeUtilization =
     "Compute Utilization/Roofline Efficiency";
 inline constexpr absl::string_view kDataMotionLayersUtilization =
     "Data motion layers utilization";
+inline constexpr absl::string_view kAsyncXlaOps = "Async XLA Ops";
+inline constexpr absl::string_view kDma = "DMA";
 
 // Other constants.
 inline constexpr absl::string_view kHloModuleDefault = "default";
 inline constexpr absl::string_view kModuleRegex = "module:.*_(\\d+)";
+inline constexpr absl::string_view kUnknown = "Unknown";
 
 }  // namespace traceviewer
 

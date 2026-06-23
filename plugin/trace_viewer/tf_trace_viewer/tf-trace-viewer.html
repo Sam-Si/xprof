@@ -698,7 +698,7 @@ dashboard would integrate trace viewer app using iframe.
       }.bind(this));
     },
 
-    _sessionId: string = '',
+    _sessionId: '',
     _devices: null,
     // Map cache of hlo module name, to hlo op name, to the adj nodes.
     _hloAdjNodesMap: new Map(),
@@ -825,9 +825,12 @@ dashboard would integrate trace viewer app using iframe.
 
     createPercaleLink: function(hloOp, host) {
       if (!this._percaleUrlPrefix || !this._sessionId || !hloOp) return;
-      const percaleLink = new URL(`${this._percaleUrlPrefix}/static?id=${this._sessionId}&hlo=${hloOp}`);
+      const percaleLink = new URL(`${this._percaleUrlPrefix}/llo?id=${this._sessionId}&name=${hloOp}`);
       if (host) {
         percaleLink.searchParams.append('host', host);
+      }
+      if (hloModule) {
+        percaleLink.searchParams.append('module', hloModule);
       }
       const percaleLinkElement = document.createElement('div');
       percaleLinkElement.innerHTML = `Percale link: <a href="${percaleLink.href}" target="_blank">see percale for low level kernel details</a>`;
@@ -852,9 +855,11 @@ dashboard would integrate trace viewer app using iframe.
         var currentProcess = currentThread.parent;
         var hloOp;
         const dataMotionLayer = ['Compute Utilization/Roofline Efficiency', 'Data motion layers utilization'].includes(event.parentContainer.name);
-        // Event is an XLA op if it is part of the XLA Ops line or in case of host XLA ops, it has hlo_op and hlo_module in the event args.
-        const xla_ops = ('XLA Ops' === event.parentContainer.name || (event.args?.hlo_op && event.args?.hlo_module));
-        if (xla_ops || dataMotionLayer) {
+        // Event is an XLA op if it is part of the XLA Ops line or in case of host XLA ops, if it
+        // has hlo_op and hlo_module in the event args. The same logic applies to Sparse Core Ops.
+        const xlaOps = ('XLA Ops' === event.parentContainer.name ||
+            'Sparse Core Ops' === event.parentContainer.name || (event.args?.hlo_op && event.args?.hlo_module));
+        if (xlaOps || dataMotionLayer) {
           var hloOp = event.args?.hlo_op || event.title;
           if (dataMotionLayer) {
             hloOp = event.args?.Name;
@@ -863,14 +868,14 @@ dashboard would integrate trace viewer app using iframe.
           const hlo_module_name = event.args?.hlo_module;
           const hlo_module_id = event.args?.hlo_module_id || event.args?.program_id;
           if (hlo_module_name && hlo_module_id) {
-            hloModule = `${hlo_module_name}(${hlo_module_id})}`;
+            hloModule = `${hlo_module_name}(${hlo_module_id})`;
           } else if (hlo_module_name) {
             // Less ideal case to disambiguate between modules due to missing id.
             hloModule = hlo_module_name;
           } else {
             for (t in currentProcess.threads) {
               var thread = currentProcess.threads[t];
-              if (thread.name != 'XLA Modules') continue;
+              if (thread.name != 'XLA Modules' && thread.name != 'Sparse Core Modules') continue;
               // Perform a linear search for containing module, because we are not expecting too
               // many modules per session. But binary search is possible here because the modules
               // array seems sorted.
@@ -980,7 +985,7 @@ dashboard would integrate trace viewer app using iframe.
           this._eventDetails.appendChild(traceViewerStepLinkElement);
         }
         // Plot the hlo graph context for the selected hlo op event.
-        if (xla_ops){
+        if (xlaOps){
           this.addHloGraphInfo(hloOp, hloModule, event);
         }
         this._selectedSingleEvent = event;
@@ -1266,7 +1271,7 @@ dashboard would integrate trace viewer app using iframe.
       }
       if (this._hloAdjNodesMap.get(moduleName).has(nodeName)) return this._hloAdjNodesMap.get(moduleName).get(nodeName);
 
-      let requestUrl;
+      let requestURL;
       if (this._sessionId) {
         requestURL = new URL(`/graph_viewer.json?session_id=${this._sessionId}`, window.location.origin);
         requestURL.searchParams.set('node_name', nodeName);
@@ -1935,6 +1940,29 @@ dashboard would integrate trace viewer app using iframe.
       return key;
     },
 
+    _maybeUpdateEventArguments: function(event) {
+      if (!event["args"] || Object.keys(event["args"]).length === 0) return;
+      const pid = event["pid"];
+      const tid = event["tid"];
+      const tsMs = event["ts"] / 1000.0;
+
+      const process = this._model.processes[pid];
+      if (!process) return;
+      const thread = process.threads[tid];
+      if (!thread) return;
+
+      // Find the slice in memory with matching start time (with epsilon tolerance)
+      for (const slice of thread.sliceGroup.slices) {
+        if (Math.abs(slice.start - tsMs) < 0.001) {
+          if (!slice.args) slice.args = {};
+          for (const key in event["args"]) {
+            slice.args[key] = event["args"][key];
+          }
+          break;
+        }
+      }
+    },
+
     // Decodes the JSON trace and specifically exclude counter events,
     // removes all events that were loaded before
     // and serializes to JSON again.
@@ -1949,6 +1977,10 @@ dashboard would integrate trace viewer app using iframe.
           if (!this._loadedTraceEvents.has(key)) {
             this._loadedTraceEvents.add(key);
             filteredTraceEvents.push(event);
+          } else {
+            // Duplicate detected: the event is already loaded on the timeline.
+            // Merge the newly parsed metadata arguments into the existing slice!
+            this._maybeUpdateEventArguments(event);
           }
         }, this);
         return filteredTraceEvents;

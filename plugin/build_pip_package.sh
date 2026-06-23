@@ -80,12 +80,13 @@ find xprof/protobuf -name \*.py -exec sed -i.bak -e '
     s/^from plugin.xprof/from xprof/
   ' {} +
 
-find . -name "*.bak" -exec rm {} \;
+find . -name "*.bak" -exec rm -f {} \;
 
-cp ${build_workspace}/bazel-bin/xprof/pywrap/_pywrap_profiler_plugin.so xprof/convert/
+cp ${build_workspace}/bazel-bin/xprof/pywrap/profiler_plugin_c_api.so xprof/convert/
+cp ${ROOT_RUNFILE_DIR}/xprof/pywrap/_pywrap_profiler_plugin.py xprof/convert/
 
 if [[ "$(uname)" == *MSYS_NT* ]]; then
-  mv xprof/convert/_pywrap_profiler_plugin.so xprof/convert/_pywrap_profiler_plugin.pyd
+  mv xprof/convert/profiler_plugin_c_api.so xprof/convert/profiler_plugin_c_api.pyd
 fi
 
 # Copy static files.
@@ -97,6 +98,8 @@ cp "$PLUGIN_RUNFILE_DIR/xprof/static/index.js" .
 cp "$PLUGIN_RUNFILE_DIR/xprof/static/materialicons.woff2" .
 cp "$PLUGIN_RUNFILE_DIR/trace_viewer/trace_viewer_index.html" .
 cp "$PLUGIN_RUNFILE_DIR/trace_viewer/trace_viewer_index.js" .
+cp "$FRONTEND_RUNFILE_DIR/app/components/trace_viewer_v2/trace_viewer_v2_wasm/trace_viewer_v2.js" .
+cp "$FRONTEND_RUNFILE_DIR/app/components/trace_viewer_v2/trace_viewer_v2_wasm/trace_viewer_v2.wasm" .
 cp -LR "$FRONTEND_RUNFILE_DIR/bundle.js" .
 cp -LR "$FRONTEND_RUNFILE_DIR/styles.css" .
 cp -LR "$FRONTEND_RUNFILE_DIR/zone.js" .

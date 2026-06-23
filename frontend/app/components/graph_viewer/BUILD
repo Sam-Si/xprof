@@ -42,6 +42,7 @@ xprof_ng_module(
         "@org_xprof//frontend/app/common/interfaces:op_profile_proto_defs",
         "@org_xprof//frontend/app/common/utils",
         "@org_xprof//frontend/app/components/controls/download_hlo",
+        "@org_xprof//frontend/app/components/controls/searchable_dropdown",
         "@org_xprof//frontend/app/components/diagnostics_view",
         "@org_xprof//frontend/app/components/graph_viewer/hlo_text_view",
         "@org_xprof//frontend/app/components/op_profile:op_profile_data",
@@ -50,6 +51,25 @@ xprof_ng_module(
         "@org_xprof//frontend/app/pipes",
         "@org_xprof//frontend/app/services/data_service_v2:data_service_v2_interface",
         "@org_xprof//frontend/app/services/source_code_service:source_code_service_interface",
+        "@org_xprof//frontend/app/store",
+    ],
+)
+
+xprof_ng_module(
+    name = "tests",
+    testonly = True,
+    srcs = ["graph_viewer_test.ts"],
+    deps = [
+        ":graph_viewer",
+        "//javascript/angular2/testing/catalyst/fake_async",
+        "//third_party/javascript/typings/jasmine",
+        "@npm//@angular/router",
+        "@npm//rxjs",
+        "@org_xprof//frontend/app/common/angular:angular_platform-browser_animation",
+        "@org_xprof//frontend/app/common/constants",
+        "@org_xprof//frontend/app/common/interfaces",
+        "@org_xprof//frontend/app/common/utils:testing",
+        "@org_xprof//frontend/app/services/data_service_v2:data_service_v2_interface",
         "@org_xprof//frontend/app/store",
     ],
 )

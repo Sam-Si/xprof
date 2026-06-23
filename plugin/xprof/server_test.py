@@ -1,6 +1,5 @@
 """Tests for the XProf server."""
 
-import argparse
 import os
 from unittest import mock
 
@@ -21,9 +20,7 @@ class ServerTest(absltest.TestCase, parameterized.TestCase):
     self.mock_path = self.enter_context(
         mock.patch.object(epath, 'Path', autospec=True)
     )
-    self.mock_parse_args = self.enter_context(
-        mock.patch.object(argparse.ArgumentParser, 'parse_args', autospec=True)
-    )
+
     self.mock_path_exists_return = True
 
     def side_effect(path):
@@ -54,17 +51,15 @@ class ServerTest(absltest.TestCase, parameterized.TestCase):
       (
           'no_logdir',
           {
-              'logdir_opt': None,
-              'logdir_pos': None,
+              'logdir': None,
               'port': 1234,
               'grpc_port': 50051,
               'worker_service_address': '0.0.0.0:50051',
               'hide_capture_profile_button': False,
               'src_prefix': '',
               'max_concurrent_worker_requests': 1,
+              'enable_tab_name_label': False,
           },
-          True,
-          0,
           server.ServerConfig(
               logdir=None,
               port=1234,
@@ -74,22 +69,19 @@ class ServerTest(absltest.TestCase, parameterized.TestCase):
               src_prefix='',
               max_concurrent_worker_requests=1,
           ),
-          True,
       ),
       (
-          'with_logdir_opt',
+          'with_logdir',
           {
-              'logdir_opt': '/tmp/log',
-              'logdir_pos': None,
+              'logdir': '/tmp/log',
               'port': 5678,
               'grpc_port': 50051,
               'worker_service_address': '0.0.0.0:50051',
               'hide_capture_profile_button': False,
               'src_prefix': '',
               'max_concurrent_worker_requests': 1,
+              'enable_tab_name_label': False,
           },
-          True,
-          0,
           server.ServerConfig(
               logdir='/tmp/log',
               port=5678,
@@ -99,64 +91,19 @@ class ServerTest(absltest.TestCase, parameterized.TestCase):
               src_prefix='',
               max_concurrent_worker_requests=1,
           ),
-          True,
-      ),
-      (
-          'with_logdir_pos',
-          {
-              'logdir_opt': None,
-              'logdir_pos': '/tmp/log',
-              'port': 9012,
-              'grpc_port': 50051,
-              'worker_service_address': '0.0.0.0:50051',
-              'hide_capture_profile_button': False,
-              'src_prefix': '',
-              'max_concurrent_worker_requests': 1,
-          },
-          True,
-          0,
-          server.ServerConfig(
-              logdir='/tmp/log',
-              port=9012,
-              grpc_port=50051,
-              worker_service_address='0.0.0.0:50051',
-              hide_capture_profile_button=False,
-              src_prefix='',
-              max_concurrent_worker_requests=1,
-          ),
-          True,
-      ),
-      (
-          'logdir_not_exists',
-          {
-              'logdir_opt': '/tmp/log',
-              'logdir_pos': None,
-              'port': 3456,
-              'grpc_port': 50051,
-              'worker_service_address': '0.0.0.0:50051',
-              'hide_capture_profile_button': False,
-              'src_prefix': '',
-              'max_concurrent_worker_requests': 1,
-          },
-          False,
-          1,
-          None,
-          False,
       ),
       (
           'hide_capture_button_enabled',
           {
-              'logdir_opt': None,
-              'logdir_pos': None,
+              'logdir': None,
               'port': 1234,
               'grpc_port': 50051,
               'worker_service_address': '0.0.0.0:50051',
               'hide_capture_profile_button': True,
               'src_prefix': '',
               'max_concurrent_worker_requests': 1,
+              'enable_tab_name_label': False,
           },
-          True,
-          0,
           server.ServerConfig(
               logdir=None,
               port=1234,
@@ -166,56 +113,60 @@ class ServerTest(absltest.TestCase, parameterized.TestCase):
               src_prefix='',
               max_concurrent_worker_requests=1,
           ),
-          True,
-      ),
-      (
-          'all_features_enabled',
-          {
-              'logdir_opt': '/tmp/log',
-              'logdir_pos': None,
-              'port': 1234,
-              'grpc_port': 50051,
-              'worker_service_address': '0.0.0.0:50051',
-              'hide_capture_profile_button': True,
-              'src_prefix': '',
-              'max_concurrent_worker_requests': 1,
-          },
-          True,
-          0,
-          server.ServerConfig(
-              logdir='/tmp/log',
-              port=1234,
-              grpc_port=50051,
-              worker_service_address='0.0.0.0:50051',
-              hide_capture_profile_button=True,
-              src_prefix='',
-              max_concurrent_worker_requests=1,
-          ),
-          True,
       ),
   )
-  def test_main(
-      self,
-      mock_args_dict,
-      path_exists,
-      expected_result,
-      expected_config,
-      should_launch_server,
-  ):
+  def test_start_server(self, mock_args_dict, expected_config):
     # Arrange
-    mock_args = argparse.Namespace(**mock_args_dict)
-    self.mock_parse_args.return_value = mock_args
-    self.mock_path_exists_return = path_exists
+    self.mock_path_exists_return = True
 
     # Act
-    result = server.main()
+    server.start_server(**mock_args_dict)
 
     # Assert
-    self.assertEqual(result, expected_result)
-    if should_launch_server:
-      self.mock_launch_server.assert_called_once_with(expected_config)
-    else:
-      self.mock_launch_server.assert_not_called()
+    self.mock_launch_server.assert_called_once_with(expected_config)
+
+  @parameterized.named_parameters(
+      (
+          'port_collision',
+          {
+              'logdir': None,
+              'port': 50051,
+              'grpc_port': 50051,
+              'worker_service_address': '0.0.0.0:50051',
+              'hide_capture_profile_button': False,
+              'src_prefix': '',
+              'max_concurrent_worker_requests': 1,
+              'enable_tab_name_label': False,
+          },
+          True,
+          'The main server port',
+      ),
+      (
+          'logdir_not_exists',
+          {
+              'logdir': '/tmp/log',
+              'port': 3456,
+              'grpc_port': 50051,
+              'worker_service_address': '0.0.0.0:50051',
+              'hide_capture_profile_button': False,
+              'src_prefix': '',
+              'max_concurrent_worker_requests': 1,
+              'enable_tab_name_label': False,
+          },
+          False,
+          'Log directory',
+      ),
+  )
+  def test_start_server_errors(
+      self, mock_args_dict, path_exists, expected_error_regex
+  ):
+    # Arrange
+    self.mock_path_exists_return = path_exists
+
+    # Act & Assert
+    with self.assertRaisesRegex(ValueError, expected_error_regex):
+      server.start_server(**mock_args_dict)
+    self.mock_launch_server.assert_not_called()
 
 
 if __name__ == '__main__':

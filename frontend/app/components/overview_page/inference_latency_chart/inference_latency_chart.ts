@@ -1,10 +1,13 @@
 import {
   AfterViewInit,
+  ChangeDetectionStrategy,
   Component,
   ElementRef,
+  EventEmitter,
   HostListener,
   Input,
   OnChanges,
+  Output,
   SimpleChanges,
   ViewChild,
 } from '@angular/core';
@@ -14,7 +17,7 @@ const MAX_CHART_WIDTH = 800;
 
 /** An inference latency chart view component. */
 @Component({
-  standalone: false,
+  changeDetection: ChangeDetectionStrategy.Default,standalone: false,
   selector: 'inference-latency-chart',
   templateUrl: './inference_latency_chart.ng.html',
   styleUrls: ['./inference_latency_chart.scss'],
@@ -24,6 +27,7 @@ export class InferenceLatencyChart implements AfterViewInit, OnChanges {
   @Input() inferenceLatencyData?: SimpleDataTable;
 
   @ViewChild('chart', {static: false}) chartRef!: ElementRef;
+  @Output() readonly ready = new EventEmitter<void>();
 
   title = 'Inference Session Latency Breakdown';
   height = 300;
@@ -114,6 +118,9 @@ export class InferenceLatencyChart implements AfterViewInit, OnChanges {
       this.chart = new google.visualization.ColumnChart(
         this.chartRef.nativeElement,
       );
+      google.visualization.events.addListener(this.chart, 'ready', () => {
+        this.ready.emit();
+      });
       this.drawChart();
     });
   }

@@ -16,13 +16,13 @@ limitations under the License.
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -31,13 +31,19 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/numeric/bits.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "google/protobuf/arena.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "re2/re2.h"
 #include "xla/tsl/lib/io/iterator.h"
 #include "xla/tsl/lib/io/table.h"
 #include "xla/tsl/lib/io/table_builder.h"
@@ -46,12 +52,16 @@ limitations under the License.
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/file_system.h"
 #include "xla/tsl/profiler/utils/timespan.h"
+#include "tsl/platform/cpu_info.h"
 #include "xprof/convert/trace_viewer/prefix_trie.h"
 #include "xprof/convert/trace_viewer/trace_events_util.h"
 #include "xprof/convert/trace_viewer/trace_viewer_visibility.h"
 #include "xprof/convert/xprof_thread_pool_executor.h"
 #include "plugin/xprof/protobuf/trace_events.pb.h"
 #include "plugin/xprof/protobuf/trace_events_raw.pb.h"
+
+ABSL_FLAG(bool, xprof_enable_metadata_indexing, false,
+          "Enable metadata indexing for trace viewer prefix search.");
 
 namespace tensorflow {
 namespace profiler {
@@ -68,22 +78,6 @@ inline int32_t NumEvents(
   return num_events;
 }
 
-// Mark events with duplicated timestamp with different serial. This is to
-// help front end to deduplicate events during streaming mode. The uniqueness
-// is guaranteed by the tuple <device_id, timestamp_ps, serial_number>.
-// REQUIRES: events is sorted by timestamp_ps
-void MaybeAddEventUniqueId(std::vector<TraceEvent*>& events) {
-  uint64_t last_ts = UINT64_MAX;
-  uint64_t serial = 0;
-  for (TraceEvent* event : events) {
-    if (event->timestamp_ps() == last_ts) {
-      event->set_serial(++serial);
-    } else {
-      serial = 0;
-    }
-    last_ts = event->timestamp_ps();
-  }
-}
 
 // Appends all events from src into dst.
 inline void AppendEvents(TraceEventTrack&& src, TraceEventTrack* dst) {
@@ -94,12 +88,82 @@ inline void AppendEvents(TraceEventTrack&& src, TraceEventTrack* dst) {
   }
 }
 
+template <typename Modifier>
+absl::Status SerializeWithReusableEvent(const TraceEvent& event,
+                                        TraceEvent& reusable_event_copy,
+                                        std::string& output,
+                                        Modifier modifier) {
+  reusable_event_copy = event;
+  modifier(&reusable_event_copy);
+
+  output.clear();
+  return reusable_event_copy.AppendToString(&output)
+             ? absl::OkStatus()
+             : absl::InternalError("Failed to serialize trace event");
+}
+
+// Extracts metadata keys from the event's raw_data and inserts them into the
+// prefix trie. Currently, we only index keys that look like "request_id"
+// (with optional numeric suffix) because these are the most common keys used
+// for tracking requests across distributed systems and are highly valuable
+// for search.
+void ExtractMetadataKeys(const TraceEvent& event, const Trace& trace,
+                         absl::string_view event_id, PrefixTrie& prefix_trie,
+                         RawData& raw_data) {
+  if (!event.has_raw_data()) return;
+
+  static constexpr LazyRE2 kSearchableKeyRegex = {"request_id[0-9]*"};
+
+  raw_data.Clear();
+  if (raw_data.ParseFromString(event.raw_data()) && raw_data.has_args()) {
+    for (const TraceEventArguments::Argument& arg : raw_data.args().arg()) {
+      if (RE2::FullMatch(arg.name(), *kSearchableKeyRegex)) {
+        std::string val;
+        if (arg.has_str_value()) {
+          val = arg.str_value();
+        } else if (arg.has_ref_value()) {
+          auto it = trace.name_table().find(arg.ref_value());
+          if (it != trace.name_table().end()) {
+            val = it->second;
+          }
+        } else if (arg.has_int_value()) {
+          val = absl::StrCat(arg.int_value());
+        } else if (arg.has_uint_value()) {
+          val = absl::StrCat(arg.uint_value());
+        }
+        if (!val.empty()) {
+          prefix_trie.Insert(val, event_id);
+        }
+      }
+    }
+  }
+}
 }  // namespace
 
+// Mark events with duplicated timestamp with different serial. This is to
+// help front end to deduplicate events during streaming mode. The uniqueness
+// is guaranteed by the tuple <device_id, timestamp_ps, serial_number>.
+void MaybeAddEventUniqueId(const std::vector<TraceEvent*>& all_events) {
+  uint64_t last_ts = UINT64_MAX;
+  uint64_t serial = 0;
+  for (TraceEvent* event : all_events) {
+    if (event->timestamp_ps() == last_ts) {
+      event->set_serial(++serial);
+    } else {
+      serial = 0;
+    }
+    last_ts = event->timestamp_ps();
+  }
+}
+
 TraceEvent::EventType GetTraceEventType(const TraceEvent& event) {
-  return event.has_resource_id() ? TraceEvent::EVENT_TYPE_COMPLETE
-         : event.has_flow_id()   ? TraceEvent::EVENT_TYPE_ASYNC
-                                 : TraceEvent::EVENT_TYPE_COUNTER;
+  if (event.has_resource_id()) {
+    return TraceEvent::EVENT_TYPE_COMPLETE;
+  } else if (event.has_flow_id()) {
+    return TraceEvent::EVENT_TYPE_ASYNC;
+  } else {
+    return TraceEvent::EVENT_TYPE_COUNTER;
+  }
 }
 
 bool ReadTraceMetadata(tsl::table::Iterator* iterator,
@@ -170,36 +234,169 @@ std::vector<TraceEvent*> MergeEventTracks(
   return events;
 }
 
-std::vector<std::vector<const TraceEvent*>> GetEventsByLevel(
-    const Trace& trace, std::vector<TraceEvent*>& events) {
-  MaybeAddEventUniqueId(events);
+std::vector<const TraceEvent*> ExtractFlowEventsParallel(
+    const std::vector<const TraceEventTrack*>& event_tracks, int num_threads) {
+  std::vector<std::vector<const TraceEvent*>> track_flow_events(
+      event_tracks.size());
+  {
+    auto executor = std::make_unique<XprofThreadPoolExecutor>(
+        "EventsByLevelParallel_Pass1", num_threads);
+    for (size_t j = 0; j < event_tracks.size(); ++j) {
+      executor->Execute([&, j] {
+        const TraceEventTrack* track = event_tracks[j];
+        for (const TraceEvent* event : *track) {
+          if (event->has_flow_id()) {
+            track_flow_events[j].push_back(event);
+          }
+        }
+      });
+    }
+  }
 
+  std::vector<const TraceEvent*> flow_events;
+  std::vector<const std::vector<const TraceEvent*>*> track_flow_events_ptrs;
+  track_flow_events_ptrs.reserve(track_flow_events.size());
+  for (const auto& vec : track_flow_events) {
+    if (!vec.empty()) {
+      track_flow_events_ptrs.push_back(&vec);
+    }
+  }
+  nway_merge(track_flow_events_ptrs, std::back_inserter(flow_events),
+             TraceEventsComparator());
+  return flow_events;
+}
+
+std::vector<absl::flat_hash_map<uint64_t, bool>> CalculateFlowVisibility(
+    const std::vector<const TraceEvent*>& flow_events,
+    tsl::profiler::Timespan trace_span) {
   constexpr int kNumLevels = NumLevels();
-
-  // Track visibility per zoom level.
-  tsl::profiler::Timespan trace_span = TraceSpan(trace);
   std::vector<TraceViewerVisibility> visibility_by_level;
   visibility_by_level.reserve(kNumLevels);
   for (int zoom_level = 0; zoom_level < kNumLevels - 1; ++zoom_level) {
     visibility_by_level.emplace_back(trace_span, LayerResolutionPs(zoom_level));
   }
 
-  std::vector<std::vector<const TraceEvent*>> events_by_level(kNumLevels);
-  for (const TraceEvent* event : events) {
+  std::vector<absl::flat_hash_map<uint64_t, bool>> flow_visibility_by_level(
+      kNumLevels);
+
+  for (const TraceEvent* event : flow_events) {
     int zoom_level = 0;
-    // Find the smallest zoom level on which we can distinguish this event.
     for (; zoom_level < kNumLevels - 1; ++zoom_level) {
-      if (visibility_by_level[zoom_level].VisibleAtResolution(*event)) {
+      bool visible =
+          visibility_by_level[zoom_level].VisibleAtResolution(*event);
+      flow_visibility_by_level[zoom_level].try_emplace(event->flow_id(),
+                                                       visible);
+      if (visible) {
         break;
       }
     }
-    events_by_level[zoom_level].push_back(event);
-    // Record the visibility of this event in all higher zoom levels.
-    // An event on zoom level N can make events at zoom levels >N invisible.
     for (++zoom_level; zoom_level < kNumLevels - 1; ++zoom_level) {
       visibility_by_level[zoom_level].SetVisibleAtResolution(*event);
+      flow_visibility_by_level[zoom_level].try_emplace(event->flow_id(), true);
     }
   }
+  return flow_visibility_by_level;
+}
+
+std::vector<std::vector<std::vector<const TraceEvent*>>>
+ProcessTrackEventsParallel(
+    const std::vector<const TraceEventTrack*>& event_tracks,
+    const std::vector<absl::flat_hash_map<uint64_t, bool>>&
+        flow_visibility_by_level,
+    tsl::profiler::Timespan trace_span, int num_threads) {
+  constexpr int kNumLevels = NumLevels();
+  std::vector<std::vector<std::vector<const TraceEvent*>>>
+      track_events_by_level(
+          event_tracks.size(),
+          std::vector<std::vector<const TraceEvent*>>(kNumLevels));
+  {
+    auto executor = std::make_unique<XprofThreadPoolExecutor>(
+        "EventsByLevelParallel_Pass2", num_threads);
+    for (size_t j = 0; j < event_tracks.size(); ++j) {
+      executor->Execute([&, j] {
+        const TraceEventTrack* track = event_tracks[j];
+
+        std::vector<TraceViewerVisibility> track_visibility_by_level;
+        track_visibility_by_level.reserve(kNumLevels);
+        for (int zoom_level = 0; zoom_level < kNumLevels - 1; ++zoom_level) {
+          track_visibility_by_level.emplace_back(trace_span,
+                                                 LayerResolutionPs(zoom_level));
+        }
+
+        for (const TraceEvent* event : *track) {
+          int zoom_level = 0;
+
+          if (event->has_flow_id()) {
+            for (; zoom_level < kNumLevels - 1; ++zoom_level) {
+              auto it =
+                  flow_visibility_by_level[zoom_level].find(event->flow_id());
+              if (it != flow_visibility_by_level[zoom_level].end() &&
+                  it->second) {
+                break;
+              }
+              if (event->duration_ps() >= LayerResolutionPs(zoom_level)) {
+                break;
+              }
+            }
+            track_events_by_level[j][zoom_level].push_back(event);
+            if (zoom_level < kNumLevels - 1) {
+              track_visibility_by_level[zoom_level].SetVisibleAtResolution(
+                  *event);
+            }
+          } else {
+            for (; zoom_level < kNumLevels - 1; ++zoom_level) {
+              if (track_visibility_by_level[zoom_level].VisibleAtResolution(
+                      *event)) {
+                break;
+              }
+            }
+            track_events_by_level[j][zoom_level].push_back(event);
+          }
+
+          for (++zoom_level; zoom_level < kNumLevels - 1; ++zoom_level) {
+            track_visibility_by_level[zoom_level].SetVisibleAtResolution(
+                *event);
+          }
+        }
+      });
+    }
+  }
+  return track_events_by_level;
+}
+
+std::vector<std::vector<const TraceEvent*>> GetEventsByLevel(
+    const Trace& trace,
+    const std::vector<const TraceEventTrack*>& event_tracks) {
+  int num_threads = std::min(tsl::port::MaxParallelism(),
+                             static_cast<int>(event_tracks.size()));
+  if (num_threads <= 0) num_threads = 1;
+
+  std::vector<const TraceEvent*> flow_events =
+      ExtractFlowEventsParallel(event_tracks, num_threads);
+
+  std::vector<absl::flat_hash_map<uint64_t, bool>> flow_visibility_by_level =
+      CalculateFlowVisibility(flow_events, TraceSpan(trace));
+
+  std::vector<std::vector<std::vector<const TraceEvent*>>>
+      track_events_by_level =
+          ProcessTrackEventsParallel(event_tracks, flow_visibility_by_level,
+                                     TraceSpan(trace), num_threads);
+
+  constexpr int kNumLevels = NumLevels();
+  std::vector<std::vector<const TraceEvent*>> events_by_level(kNumLevels);
+  for (int zoom_level = 0; zoom_level < kNumLevels; ++zoom_level) {
+    std::vector<const std::vector<const TraceEvent*>*> level_events_ptrs;
+    level_events_ptrs.reserve(event_tracks.size());
+    for (size_t j = 0; j < event_tracks.size(); ++j) {
+      if (!track_events_by_level[j][zoom_level].empty()) {
+        level_events_ptrs.push_back(&track_events_by_level[j][zoom_level]);
+      }
+    }
+    nway_merge(level_events_ptrs,
+               std::back_inserter(events_by_level[zoom_level]),
+               TraceEventsComparator());
+  }
+
   return events_by_level;
 }
 
@@ -235,15 +432,22 @@ absl::Status ReadFileTraceMetadata(std::string& filepath, Trace* trace) {
 
 absl::Status CreateAndSavePrefixTrie(
     tsl::WritableFile* trace_events_prefix_trie_file,
-    const std::vector<std::vector<const TraceEvent*>>& events_by_level) {
+    const std::vector<std::vector<const TraceEvent*>>& events_by_level,
+    const Trace& trace) {
   absl::Time start_time = absl::Now();
   PrefixTrie prefix_trie;
+  RawData raw_data;
+  bool enable_metadata_indexing =
+      absl::GetFlag(FLAGS_xprof_enable_metadata_indexing);
   for (int zoom_level = 0; zoom_level < events_by_level.size(); ++zoom_level) {
     for (const TraceEvent* event : events_by_level[zoom_level]) {
       std::string event_id =
           LevelDbTableKey(zoom_level, event->timestamp_ps(), event->serial());
       if (!event_id.empty()) {
         prefix_trie.Insert(event->name(), event_id);
+        if (enable_metadata_indexing) {
+          ExtractMetadataKeys(*event, trace, event_id, prefix_trie, raw_data);
+        }
       }
     }
   }
@@ -259,26 +463,27 @@ absl::Status DoStoreAsLevelDbTables(
     const Trace& trace, std::unique_ptr<tsl::WritableFile>& trace_events_file,
     std::unique_ptr<tsl::WritableFile>& trace_events_metadata_file,
     std::unique_ptr<tsl::WritableFile>& trace_events_prefix_trie_file) {
-  auto executor = std::make_unique<XprofThreadPoolExecutor>(
-      "StoreAsLevelDbTables", /*num_threads=*/3);
+  std::unique_ptr<XprofThreadPoolExecutor> executor =
+      std::make_unique<XprofThreadPoolExecutor>("StoreAsLevelDbTables",
+                                                /*num_threads=*/3);
   absl::Status trace_events_status, trace_events_metadata_status;
   executor->Execute(
       [&trace_events_file, &trace, &events_by_level, &trace_events_status]() {
         trace_events_status = DoStoreAsLevelDbTable(
             trace_events_file, trace, events_by_level,
-            GenerateTraceEventCopyForPersistingEventWithoutMetadata);
+            SerializeTraceEventForPersistingEventWithoutMetadata);
       });
   executor->Execute([&trace_events_metadata_file, &events_by_level, &trace,
                      &trace_events_metadata_status]() {
     trace_events_metadata_status = DoStoreAsLevelDbTable(
         trace_events_metadata_file, trace, events_by_level,
-        GenerateTraceEventCopyForPersistingOnlyMetadata);
+        SerializeTraceEventForPersistingOnlyMetadata);
   });
   absl::Status trace_events_prefix_trie_status;
-  executor->Execute([&trace_events_prefix_trie_file, &events_by_level,
+  executor->Execute([&trace_events_prefix_trie_file, &events_by_level, &trace,
                      &trace_events_prefix_trie_status]() {
     trace_events_prefix_trie_status = CreateAndSavePrefixTrie(
-        trace_events_prefix_trie_file.get(), events_by_level);
+        trace_events_prefix_trie_file.get(), events_by_level, trace);
   });
   executor->JoinAll();
   trace_events_status.Update(trace_events_metadata_status);
@@ -286,43 +491,43 @@ absl::Status DoStoreAsLevelDbTables(
   return trace_events_status;
 }
 
-std::optional<TraceEvent> GenerateTraceEventCopyForPersistingFullEvent(
-    const TraceEvent* event) {
-  TraceEvent event_copy = *event;
-  // To reduce file size, clear the timestamp from the value. It is
-  // redundant info because the timestamp is part of the key.
-  event_copy.clear_timestamp_ps();
-  return event_copy;
+absl::Status SerializeTraceEventForPersistingFullEvent(
+    const TraceEvent& event, TraceEvent& reusable_event_copy,
+    std::string& output) {
+  return SerializeWithReusableEvent(
+      event, reusable_event_copy, output,
+      [](TraceEvent* copy) { copy->clear_timestamp_ps(); });
 }
 
-std::optional<TraceEvent>
-GenerateTraceEventCopyForPersistingEventWithoutMetadata(
-    const TraceEvent* event) {
-  TraceEvent event_copy = *event;
-  // To reduce file size, clear the timestamp from the value. It is
-  // redundant info because the timestamp is part of the key.
-  event_copy.clear_timestamp_ps();
-  // To reduce file size, clear the raw data from the value. It is
-  // redundant info because the raw data is stored in the metadata file.
-  // However, we still need to keep the raw data for counter events as they
-  // are a special case and we need to return the args for the same during the
-  // initial read.
-  if (GetTraceEventType(*event) != TraceEvent::EVENT_TYPE_COUNTER) {
-    event_copy.clear_raw_data();
-  }
-  return event_copy;
+absl::Status SerializeTraceEventForPersistingEventWithoutMetadata(
+    const TraceEvent& event, TraceEvent& reusable_event_copy,
+    std::string& output) {
+  return SerializeWithReusableEvent(
+      event, reusable_event_copy, output, [](TraceEvent* copy) {
+        copy->clear_timestamp_ps();
+        if (GetTraceEventType(*copy) != TraceEvent::EVENT_TYPE_COUNTER) {
+          copy->clear_raw_data();
+        }
+      });
 }
 
-std::optional<TraceEvent> GenerateTraceEventCopyForPersistingOnlyMetadata(
-    const TraceEvent* event) {
-  if (GetTraceEventType(*event) == TraceEvent::EVENT_TYPE_COUNTER) {
-    // Counter events are stored in the trace events file itself and do not
-    // require a metadata copy.
-    return std::nullopt;
+absl::Status SerializeTraceEventForPersistingOnlyMetadata(
+    const TraceEvent& event, TraceEvent& reusable_event, std::string& output) {
+  // Counter events are stored in the trace events file itself and do not
+  // require a metadata copy.
+  if (GetTraceEventType(event) == TraceEvent::EVENT_TYPE_COUNTER) {
+    return absl::NotFoundError("No metadata found for counter event");
   }
-  TraceEvent event_copy;
-  event_copy.set_raw_data(event->raw_data());
-  return event_copy;
+
+  // Reconstruct explicitly avoiding a deep copy inside
+  // SerializeWithReusableEvent to save substantial memory allocation
+  // operations.
+  reusable_event.Clear();
+  reusable_event.set_raw_data(event.raw_data());
+  output.clear();
+  return reusable_event.AppendToString(&output)
+             ? absl::OkStatus()
+             : absl::InternalError("Failed to serialize trace event");
 }
 
 // Store the contents of this container in an sstable file. The format is as
@@ -340,8 +545,7 @@ std::optional<TraceEvent> GenerateTraceEventCopyForPersistingOnlyMetadata(
 absl::Status DoStoreAsLevelDbTable(
     std::unique_ptr<tsl::WritableFile>& file, const Trace& trace,
     const std::vector<std::vector<const TraceEvent*>>& events_by_level,
-    std::function<std::optional<TraceEvent>(const TraceEvent*)>
-        generate_event_copy_fn) {
+    SerializeEventFn serialize_event_fn) {
   absl::Time start_time = absl::Now();
   tsl::table::Options options;
   options.block_size = 20 * 1024 * 1024;
@@ -350,26 +554,155 @@ absl::Status DoStoreAsLevelDbTable(
 
   builder.Add(kTraceMetadataKey, trace.SerializeAsString());
 
-  size_t num_of_events_dropped = 0;  // Due to too many timestamp repetitions.
+  constexpr size_t kChunkSize = 10000;
+  constexpr size_t kMaxBufferedChunks = 20;
+
+  size_t total_chunks = 0;
+  std::vector<size_t> chunks_per_level(events_by_level.size());
   for (int zoom_level = 0; zoom_level < events_by_level.size(); ++zoom_level) {
-    // The key of level db table have to be monotonically increasing, therefore
-    // we make the timestamp repetition count as the last byte of key as tie
-    // breaker. The hidden assumption was that there are not too many identical
-    // timestamp per resolution, (if there are such duplications, we dropped
-    // them if it overflow the last byte).
-    for (const TraceEvent* event : events_by_level[zoom_level]) {
-      uint64_t timestamp = event->timestamp_ps();
-      std::string key = LevelDbTableKey(zoom_level, timestamp, event->serial());
-      if (!key.empty()) {
-        auto event_copy = generate_event_copy_fn(event);
-        if (event_copy.has_value()) {
-          builder.Add(key, event_copy->SerializeAsString());
+    size_t num_events = events_by_level[zoom_level].size();
+    chunks_per_level[zoom_level] = (num_events + kChunkSize - 1) / kChunkSize;
+    total_chunks += chunks_per_level[zoom_level];
+  }
+
+  struct SharedState {
+    // Mutex protecting the shared state and used for condition variables.
+    absl::Mutex mu;
+    // Pre-allocated vector to store serialized data for each chunk.
+    // Workers write to their assigned index without holding the lock.
+    std::vector<std::vector<std::pair<std::string, std::string>>>
+        completed_chunks;
+    // Boolean flag for each chunk indicating that the worker has finished
+    // writing data to completed_chunks.
+    std::vector<bool> chunk_ready;
+    // Stores the first error encountered by any worker thread.
+    absl::Status status;
+    // Total number of events dropped across all chunks.
+    size_t dropped_events = 0;
+  };
+
+  auto shared_state = std::make_shared<SharedState>();
+  shared_state->completed_chunks.resize(total_chunks);
+  shared_state->chunk_ready.resize(total_chunks, false);
+  absl::Status writer_status = absl::OkStatus();
+
+  struct TaskDescriptor {
+    int zoom_level;
+    size_t chunk_idx;
+    const std::vector<const TraceEvent*>* level_events;
+  };
+  std::vector<TaskDescriptor> task_descriptors;
+  task_descriptors.reserve(total_chunks);
+
+  for (int zoom_level = 0; zoom_level < events_by_level.size(); ++zoom_level) {
+    const auto& level_events = events_by_level[zoom_level];
+    size_t num_chunks = chunks_per_level[zoom_level];
+    for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+      task_descriptors.push_back({zoom_level, chunk_idx, &level_events});
+    }
+  }
+
+  {
+    XprofThreadPoolExecutor executor("SerializationPool");
+
+    auto submit_task = [&](size_t idx) {
+      const auto& desc = task_descriptors[idx];
+      executor.Execute([idx, desc, shared_state, &serialize_event_fn]() {
+        {
+          absl::MutexLock lock(shared_state->mu);
+          if (!shared_state->status.ok()) return;
         }
-      } else {
-        ++num_of_events_dropped;
+
+        size_t start_idx = desc.chunk_idx * kChunkSize;
+        size_t end_idx =
+            std::min(start_idx + kChunkSize, desc.level_events->size());
+        std::vector<std::pair<std::string, std::string>> chunk_data;
+        chunk_data.reserve(end_idx - start_idx);
+
+        google::protobuf::Arena arena;
+        TraceEvent* reusable_event = google::protobuf::Arena::Create<TraceEvent>(&arena);
+        std::string buffer;
+        size_t dropped = 0;
+
+        for (size_t i = start_idx; i < end_idx; ++i) {
+          const TraceEvent* event = (*desc.level_events)[i];
+          uint64_t timestamp = event->timestamp_ps();
+          std::string key =
+              LevelDbTableKey(desc.zoom_level, timestamp, event->serial());
+          if (!key.empty()) {
+            absl::Status status =
+                serialize_event_fn(*event, *reusable_event, buffer);
+            if (status.ok()) {
+              chunk_data.push_back({std::move(key), buffer});
+            } else if (!absl::IsNotFound(status)) {
+              absl::MutexLock lock(shared_state->mu);
+              if (shared_state->status.ok()) {
+                shared_state->status = status;
+              }
+              return;
+            }
+          } else {
+            ++dropped;
+          }
+        }
+
+        // Write to vector (Outside lock!)
+        shared_state->completed_chunks[idx] = std::move(chunk_data);
+
+        // Mark as ready and update dropped count (Inside lock)
+        {
+          absl::MutexLock lock(shared_state->mu);
+          shared_state->chunk_ready[idx] = true;
+          shared_state->dropped_events += dropped;
+        }
+      });
+    };
+
+    size_t next_chunk_to_submit = 0;
+    for (size_t i = 0; i < std::min(kMaxBufferedChunks, total_chunks); ++i) {
+      submit_task(next_chunk_to_submit++);
+    }
+
+    // Writer loop in main thread
+    for (size_t i = 0; i < total_chunks; ++i) {
+      std::vector<std::pair<std::string, std::string>> chunk_data;
+      struct IsReadyArgs {
+        SharedState* state;
+        size_t idx;
+      } args{shared_state.get(), i};
+
+      {
+        absl::MutexLock lock(shared_state->mu);
+        shared_state->mu.Await(absl::Condition(
+            +[](void* arg) -> bool {
+              auto* a = static_cast<IsReadyArgs*>(arg);
+              return a->state->chunk_ready[a->idx] || !a->state->status.ok();
+            },
+            &args));
+
+        if (!shared_state->status.ok()) {
+          writer_status = shared_state->status;
+          break;
+        }
+
+        chunk_data = std::move(shared_state->completed_chunks[i]);
+      }
+
+      for (const auto& [key, value] : chunk_data) {
+        builder.Add(key, value);
+      }
+
+      // Submit next task in sliding window
+      if (next_chunk_to_submit < total_chunks) {
+        submit_task(next_chunk_to_submit++);
       }
     }
   }
+
+  TF_RETURN_IF_ERROR(writer_status);
+
+  size_t num_of_events_dropped = shared_state->dropped_events;
+
   absl::string_view filename;
   TF_RETURN_IF_ERROR(file->Name(&filename));
   LOG(INFO) << "Storing " << trace.num_events() - num_of_events_dropped

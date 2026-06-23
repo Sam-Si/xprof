@@ -113,6 +113,24 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "flat_op_metrics_db_utils",
+    srcs = ["flat_op_metrics_db_utils.cc"],
+    hdrs = ["flat_op_metrics_db_utils.h"],
+    deps = [
+        ":op_metrics_db_utils",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@xla//xla/hlo/ir:hlo",
+        "@xla//xla/tsl/platform:logging",
+        "@xla//xla/tsl/platform:macros",
+        "@xla//xla/tsl/profiler/utils:math_utils",
+        "@xla//xla/tsl/profiler/utils:xplane_schema",
+        "@xla//xla/tsl/profiler/utils:xplane_visitor",
+    ],
+)
+
 cc_test(
     name = "op_metrics_db_utils_test",
     srcs = ["op_metrics_db_utils_test.cc"],
@@ -124,6 +142,23 @@ cc_test(
         "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/profiler/utils:tf_xplane_visitor",
+        "@xla//xla/tsl/profiler/utils:xplane_builder",
+        "@xla//xla/tsl/profiler/utils:xplane_schema",
+        "@xla//xla/tsl/profiler/utils:xplane_visitor",
+    ],
+)
+
+cc_test(
+    name = "flat_op_metrics_db_utils_test",
+    srcs = ["flat_op_metrics_db_utils_test.cc"],
+    deps = [
+        ":flat_op_metrics_db_utils",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/profiler/utils:xplane_builder",
         "@xla//xla/tsl/profiler/utils:xplane_schema",
         "@xla//xla/tsl/profiler/utils:xplane_visitor",
@@ -149,6 +184,20 @@ cc_library(
         "@xla//xla/tsl/profiler/convert:xla_op_utils",
         "@xla//xla/tsl/profiler/utils:tf_op_utils",
         "@xla//xla/tsl/profiler/utils:timespan",
+    ],
+)
+
+cc_test(
+    name = "op_utils_test",
+    size = "small",
+    srcs = ["op_utils_test.cc"],
+    deps = [
+        ":op_utils",
+        ":performance_info_wrapper",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:source_info_proto_cc",
+        "@xla//xla/tsl/profiler/convert:xla_op_utils",
     ],
 )
 
@@ -445,7 +494,7 @@ cc_test(
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
         "@xla//xla/hlo/ir:hlo",
-        "@xla//xla/tests:hlo_test_base",
+        "@xla//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "@xla//xla/tsl/platform:statusor",
     ],
 )
@@ -493,9 +542,9 @@ cc_test(
         "@xla//xla:shape_util",
         "@xla//xla:xla_data_proto_cc",
         "@xla//xla/hlo/ir:hlo",
+        "@xla//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "@xla//xla/hlo/testlib:test_helpers",
         "@xla//xla/service:hlo_cost_analysis",
-        "@xla//xla/tests:hlo_test_base",
         "@xla//xla/tests:xla_internal_test_main",
         "@xla//xla/tsl/platform:statusor",
     ],
@@ -684,7 +733,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "@xla//xla/hlo/ir:hlo",
         "@xla//xla/hlo/parser:hlo_parser",
-        "@xla//xla/tests:hlo_test_base",
+        "@xla//xla/hlo/testlib:hlo_hardware_independent_test_base",
     ],
 )
 
@@ -699,6 +748,32 @@ cc_library(
 )
 
 cc_library(
-    name = "tpu_counter_ids_v7",
-    hdrs = ["tpu_counter_ids_v7.h"],
+    name = "tpu_counter_ids_v6e",
+    hdrs = ["tpu_counter_ids_v6e.h"],
+)
+
+cc_library(
+    name = "xplane_hlo_fixer",
+    srcs = ["xplane_hlo_fixer.cc"],
+    hdrs = ["xplane_hlo_fixer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@com_googlesource_code_re2//:re2",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/platform:logging",
+        "@xla//xla/tsl/profiler/utils:xplane_schema",
+    ],
+)
+
+cc_test(
+    name = "xplane_hlo_fixer_test",
+    srcs = ["xplane_hlo_fixer_test.cc"],
+    deps = [
+        ":xplane_hlo_fixer",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/profiler/utils:xplane_builder",
+        "@xla//xla/tsl/profiler/utils:xplane_schema",
+    ],
 )

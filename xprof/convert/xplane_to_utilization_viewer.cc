@@ -1,10 +1,15 @@
 #include "xprof/convert/xplane_to_utilization_viewer.h"
 
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/functional/overload.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "xla/tsl/profiler/utils/tf_xplane_visitor.h"
@@ -12,7 +17,7 @@
 #include "xla/tsl/profiler/utils/xplane_visitor.h"
 #include "xprof/convert/data_table_utils.h"
 #include "xprof/convert/tpu_counter_util.h"
-#include "xprof/convert/tpuv7generic_utilization_utils.h"
+#include "xprof/convert/tpu_generic_utilization_utils.h"
 
 namespace xprof {
 
@@ -21,6 +26,7 @@ namespace xprof {
 enum class ViewerDeviceType {
   UNKNOWN_DEVICE = 0,
   TPU_V7X = 12,
+  TPU_V6E = 13,  // NOTE: For counter calculations, uses TPUv7.
 };
 
 namespace {
@@ -35,35 +41,101 @@ using ::tsl::profiler::XSpace;
 
 // Hardcoded values from device_type_utils.cc/h
 double GetTensorCoreFrequencyHz(ViewerDeviceType device_type) {
-  if (device_type == ViewerDeviceType::TPU_V7X) {
-    return 1.9e9;
+  switch (device_type) {
+    case ViewerDeviceType::TPU_V6E:
+      return 1.75e9;
+    case ViewerDeviceType::TPU_V7X:
+      return 1.9e9;
+    default:
+      return 1.0e9;  // Default
   }
-  return 1.0e9;  // Default
 }
 
-double GetPeakHbmBandwidthBps(ViewerDeviceType device_type) {
-  constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
-  if (device_type == ViewerDeviceType::TPU_V7X) {
-    return 3433.0 * kGiB;
-  }
-  return 1.2e12;  // Default
+bool isTpuV6e(absl::string_view device_type) {
+  return absl::StrContains(device_type, "TPU v6 Lite");
 }
-
-int GetNumMxus(ViewerDeviceType device_type) { return 2; }
-
-int GetCyclesPerXlu(ViewerDeviceType device_type) {
-  return 1;  // TPU v7x and default
-}
-
-int GetTcCoreCount(ViewerDeviceType device_type) { return 2; }
 
 bool IsTpuV7x(absl::string_view device_type) {
   return absl::StrContains(device_type, "TPU v7x");
 }
 
+double GetPeakHbmBandwidthBps(ViewerDeviceType device_type) {
+  constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+  switch (device_type) {
+    case ViewerDeviceType::TPU_V6E:
+      return 1525.5 * kGiB;
+    case ViewerDeviceType::TPU_V7X:
+      return 3433.0 * kGiB;
+    default:
+      return 1.2e12;  // Default
+  }
+}
+
+int GetNumMxus(ViewerDeviceType device_type) { return 2; }
+
+int GetCyclesPerXlu(ViewerDeviceType device_type) {
+  switch (device_type) {
+    case ViewerDeviceType::TPU_V6E:
+      return 4;
+    case ViewerDeviceType::TPU_V7X:
+      return 1;
+    default:
+      return 1;
+  }
+}
+
+int GetTcCoreCount(ViewerDeviceType device_type) {
+  switch (device_type) {
+    case ViewerDeviceType::TPU_V6E:
+      return 1;
+    case ViewerDeviceType::TPU_V7X:
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+int GetNumDies(ViewerDeviceType device_type) {
+  switch (device_type) {
+    case ViewerDeviceType::TPU_V6E:
+      return 1;
+    case ViewerDeviceType::TPU_V7X:
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+int GetNumScCoresPerDie(ViewerDeviceType device_type) { return 2; }
+
 // Helper to determine if we should process this device.
 bool ShouldProcessDevice(absl::string_view device_type) {
-  return IsTpuV7x(device_type);
+  static const auto* const kSupportedDevices =
+      new absl::flat_hash_set<std::string>{
+          "TPU v7x",
+          "TPU v6 Lite",
+      };
+  return kSupportedDevices->contains(device_type);
+}
+
+uint64_t GetCounterValue(std::variant<double, uint64_t> counter_value) {
+  return std::visit(
+      absl::Overload{
+          [](double arg) -> uint64_t {
+            // Ensure arg stays in bounds.
+            if (arg <
+                static_cast<double>(std::numeric_limits<uint64_t>::min())) {
+              return 0;
+            } else if (arg >= static_cast<double>(
+                                  std::numeric_limits<uint64_t>::max())) {
+              return std::numeric_limits<uint64_t>::max();
+            } else {
+              return static_cast<uint64_t>(arg);
+            }
+          },
+          [](uint64_t arg) -> uint64_t { return arg; },
+      },
+      counter_value);
 }
 
 }  // namespace
@@ -119,6 +191,8 @@ absl::StatusOr<std::string> ConvertXSpaceToUtilizationViewer(
     ViewerDeviceType device_type_enum = ViewerDeviceType::UNKNOWN_DEVICE;
     if (IsTpuV7x(device_type)) {
       device_type_enum = ViewerDeviceType::TPU_V7X;
+    } else if (isTpuV6e(device_type)) {
+      device_type_enum = ViewerDeviceType::TPU_V6E;
     }
 
     visitor.ForEachLine([&](const tsl::profiler::XLineVisitor& line) {
@@ -127,7 +201,7 @@ absl::StatusOr<std::string> ConvertXSpaceToUtilizationViewer(
 
       line.ForEachEvent([&](const tsl::profiler::XEventVisitor& event) {
         uint64_t counter_id = 0;
-        double counter_value = 0.0;
+        std::variant<double, uint64_t> counter_value = 0.0;
         bool found_value = false;
 
         // 1. Extract Counter ID
@@ -152,15 +226,17 @@ absl::StatusOr<std::string> ConvertXSpaceToUtilizationViewer(
 
         if (val_stat) {
           // IntOrUintValue fallback added here
-          counter_value = val_stat->DoubleValue();
-          if (counter_value == 0.0) {
-            counter_value = static_cast<double>(val_stat->IntOrUintValue());
+          double double_value = val_stat->DoubleValue();
+          if (double_value == 0.0) {
+            counter_value = val_stat->IntOrUintValue();
+          } else {
+            counter_value = double_value;
           }
           found_value = true;
         }
 
         if (found_value && counter_id != 0) {
-          counters_map[counter_id] = static_cast<uint64_t>(counter_value);
+          counters_map[counter_id] = GetCounterValue(counter_value);
         }
       });
 
@@ -173,10 +249,10 @@ absl::StatusOr<std::string> ConvertXSpaceToUtilizationViewer(
       utilization.device_id = device_id;
       utilization.correlation_id = sample_id;
 
-      xprof::Tpuv7GenericUtilizationOptions options;
+      xprof::TpuGenericUtilizationOptions options;
       options.num_mxu_per_tensor_core = GetNumMxus(device_type_enum);
       options.cycles_per_xlu_instruction = GetCyclesPerXlu(device_type_enum);
-      options.is_tpu7 = (device_type_enum != ViewerDeviceType::TPU_V7X);
+      options.is_tpu6e = (device_type_enum == ViewerDeviceType::TPU_V6E);
       options.frequency_hz = GetTensorCoreFrequencyHz(device_type_enum);
       options.peak_hbm_bw_bps = GetPeakHbmBandwidthBps(device_type_enum);
 
@@ -184,30 +260,37 @@ absl::StatusOr<std::string> ConvertXSpaceToUtilizationViewer(
       int num_tc_cores = GetTcCoreCount(device_type_enum);
 
       for (int core = 0; core < num_tc_cores; ++core) {
-        // 1. Process TC Core (Generic V7 logic applies to V7 and V7x TC)
-        xprof::ComputeTpuv7GenericTcUnitUtilization(tpu_counters, options, core,
-                                                    &utilization);
+        // 1. Process TC Core
+        xprof::ComputeTpuGenericTcUnitUtilization(tpu_counters, options, core,
+                                                  &utilization);
 
         // 2. Process Bandwidth (HBM)
-        xprof::ComputeTpuv7GenericBandwidthUtilization(tpu_counters, options,
-                                                       core, &utilization);
+        xprof::ComputeTpuGenericBandwidthUtilization(tpu_counters, options,
+                                                     core, &utilization);
 
         // 3. Process ICI Bandwidth (Per Device/Chip)
         // ExtractUtilizationCounters calls this inside the loop, so we
         // duplicate to match regression test behavior.
-        xprof::ComputeTpuv7GenericIciBandwidthUtilization(tpu_counters, options,
-                                                          &utilization);
+        xprof::ComputeTpuGenericIciBandwidthUtilization(tpu_counters, options,
+                                                        &utilization);
       }
 
-      // 4. Process SC Cores (V7x only, interleaved per die/core)
+      // 4. Process SC Cores (interleaved per die/core)
       // Must come AFTER TC/HBM metrics to match ExtractUtilizationCounters
       // (tpu_counter_util.cc)
       if (device_type_enum == ViewerDeviceType::TPU_V7X) {
-        for (int die = 0; die < 2; ++die) {
-          for (int sc_core = 0; sc_core < 2; ++sc_core) {
+        for (int die = 0; die < GetNumDies(device_type_enum); ++die) {
+          for (int sc_core = 0; sc_core < GetNumScCoresPerDie(device_type_enum);
+               ++sc_core) {
             xprof::ComputeTpuv7xScUnitUtilization(tpu_counters, die, sc_core,
                                                   &utilization);
           }
+        }
+      } else if (device_type_enum == ViewerDeviceType::TPU_V6E) {
+        for (int sc_core = 0; sc_core < GetNumScCoresPerDie(device_type_enum);
+             ++sc_core) {
+          xprof::ComputeTpuv6eScUnitUtilization(tpu_counters, 0, sc_core,
+                                                &utilization);
         }
       }
 

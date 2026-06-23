@@ -17,7 +17,7 @@ toc:
   path: /xprof
 - title: Terminology
   path: /xprof/terminology
-- title: Tool Documentation
+- title: Tools Documentation
   section:
   - title: Overview Page
     path: /xprof/overview_page
@@ -39,22 +39,32 @@ toc:
     path: /xprof/framework_op_stats
   - title: HLO Op Stats
     path: /xprof/hlo_op_stats
-  - title: Megascale Stats
-    path: /xprof/megascale_stats
+  - title: Megascale Viewer
+    path: /xprof/megascale_viewer
   - title: Utilization Viewer
     path: /xprof/utilization_viewer
   - title: Perf Counters
     path: /xprof/perf_counters
-- title: Demo Notebook
+- title: Guides
   section:
   - title: XProf Demo
     path: /xprof/xprof_demo
-- title: Capturing profiles
-  path: /xprof/capturing_profiles
+  - title: Capturing profiles
+    path: /xprof/capturing_profiles
+  - title: Custom Call Profiling
+    path: /xprof/custom_call_profiling
+  - title: Tracking Tensor Lifetimes and Identifying Memory Leaks
+    path: /xprof/memory_leaks
+  - title: XProf Kernel User Guide
+    path: /xprof/kernel-profiling
 - title: Framework-specific profiling
   section:
   - title: JAX
     path: /xprof/jax_profiling
+  - title: JAX on GPUs
+    path: /xprof/jax_gpu_profiling
+  - title: JAX Advanced Options
+    path: /xprof/advanced_profiler_options
   - title: PyTorch/XLA
     path: /xprof/pytorch_xla_profiling
   - title: Tensorflow

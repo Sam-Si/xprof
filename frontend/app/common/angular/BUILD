@@ -19,6 +19,14 @@ ts_library(
 )
 
 ts_library(
+    name = "angular_material_autocomplete",
+    srcs = [],
+    deps = [
+        "@npm//@angular/material",
+    ],
+)
+
+ts_library(
     name = "angular_material_expansion",
     srcs = [],
     deps = [
@@ -203,7 +211,23 @@ ts_library(
 )
 
 ts_library(
+    name = "angular_material_sort",
+    srcs = [],
+    deps = [
+        "@npm//@angular/material",
+    ],
+)
+
+ts_library(
     name = "angular_material_table",
+    srcs = [],
+    deps = [
+        "@npm//@angular/material",
+    ],
+)
+
+ts_library(
+    name = "angular_material_tabs",
     srcs = [],
     deps = [
         "@npm//@angular/material",

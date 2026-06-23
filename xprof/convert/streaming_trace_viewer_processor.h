@@ -7,65 +7,21 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 #include "xla/tsl/platform/errors.h"
 #include "tsl/profiler/protobuf/xplane.pb.h"
 #include "xprof/convert/profile_processor.h"
 #include "xprof/convert/repository.h"
 #include "xprof/convert/tool_options.h"
+#include "xprof/convert/trace_view_options.h"
+#include "xprof/convert/trace_viewer/trace_options.h"
+#include "xprof/convert/xplane_to_trace_container.h"
 #include "plugin/xprof/protobuf/op_stats.pb.h"
-#include "absl/strings/numbers.h"
 
 namespace xprof {
 
-namespace internal {
-// Options for trace viewer used for testing.
-struct TraceViewOption {
-  uint64_t resolution = 0;
-  double start_time_ms = 0.0;
-  double end_time_ms = 0.0;
-  std::string event_name = "";
-  std::string search_prefix = "";
-  double duration_ms = 0.0;
-  uint64_t unique_id = 0;
-};
-
-inline absl::StatusOr<TraceViewOption> GetTraceViewOption(
-    const tensorflow::profiler::ToolOptions& options) {
-  TraceViewOption trace_options;
-  auto start_time_ms_opt =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "start_time_ms", "0.0");
-  auto end_time_ms_opt =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "end_time_ms", "0.0");
-  auto resolution_opt =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "resolution", "0");
-  trace_options.event_name =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "event_name", "");
-  trace_options.search_prefix =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "search_prefix", "");
-  auto duration_ms_opt =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "duration_ms", "0.0");
-  auto unique_id_opt =
-      tensorflow::profiler::GetParamWithDefault<std::string>(
-          options, "unique_id", "0");
-
-
-  if (!absl::SimpleAtoi(resolution_opt, &trace_options.resolution) ||
-      !absl::SimpleAtod(start_time_ms_opt, &trace_options.start_time_ms) ||
-      !absl::SimpleAtod(end_time_ms_opt, &trace_options.end_time_ms) ||
-      !absl::SimpleAtoi(unique_id_opt, &trace_options.unique_id) ||
-      !absl::SimpleAtod(duration_ms_opt, &trace_options.duration_ms)) {
-    return tsl::errors::InvalidArgument("wrong arguments");
-  }
-  return trace_options;
-}
-}  // namespace internal
-
+// A profile processor that generates trace viewer events from XSpace data
+// and supports streaming them (e.g., via LevelDB tables).
 class StreamingTraceViewerProcessor : public ProfileProcessor {
  public:
   explicit StreamingTraceViewerProcessor(
@@ -94,6 +50,12 @@ class StreamingTraceViewerProcessor : public ProfileProcessor {
   }
 
  private:
+  absl::Status SerializeAndSetOutput(
+      const tensorflow::profiler::TraceEventsContainer& merged_trace_container,
+      const tensorflow::profiler::TraceViewOption& trace_option,
+      const tensorflow::profiler::TraceOptions& profiler_trace_options,
+      absl::string_view session_id);
+
   tensorflow::profiler::ToolOptions options_;
 };
 

@@ -1,4 +1,4 @@
-#include "xprof/frontend/app/components/trace_viewer_v2/event_manager.h"
+#include "frontend/app/components/trace_viewer_v2/event_manager.h"
 
 #include <emscripten/val.h>
 
@@ -26,6 +26,20 @@ emscripten::val AnyToVal(const absl::any& any_val) {
   if (any_val.type() == typeid(int)) {
     return emscripten::val(absl::any_cast<int>(any_val));
   }
+  if (any_val.type() == typeid(uint32_t)) {
+    return emscripten::val(absl::any_cast<uint32_t>(any_val));
+  }
+  if (any_val.type() == typeid(int64_t)) {
+    // JavaScript Numbers max safe int is 2^53 - 1, converting Number for now
+    // which may lose precision but the Emscripten binding allows JS float
+    // numbers safely.
+    return emscripten::val(
+        static_cast<double>(absl::any_cast<int64_t>(any_val)));
+  }
+  if (any_val.type() == typeid(uint64_t)) {
+    return emscripten::val(
+        static_cast<double>(absl::any_cast<uint64_t>(any_val)));
+  }
   if (any_val.type() == typeid(float)) {
     return emscripten::val(absl::any_cast<float>(any_val));
   }
@@ -40,6 +54,12 @@ emscripten::val AnyToVal(const absl::any& any_val) {
   }
   if (any_val.type() == typeid(EventData)) {
     return EventDataToVal(absl::any_cast<EventData>(any_val));
+  }
+  if (any_val.type() == typeid(uint64_t)) {
+    return emscripten::val(absl::any_cast<uint64_t>(any_val));
+  }
+  if (any_val.type() == typeid(int64_t)) {
+    return emscripten::val(absl::any_cast<int64_t>(any_val));
   }
   // Add more types in the future if needed.
 

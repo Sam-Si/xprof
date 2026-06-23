@@ -1,4 +1,4 @@
-import {Component, inject, OnDestroy} from '@angular/core';
+import {Component, inject, OnDestroy, ChangeDetectionStrategy} from '@angular/core';
 import {ActivatedRoute, Params, Router} from '@angular/router';
 import {Store} from '@ngrx/store';
 import {Throbber} from 'org_xprof/frontend/app/common/classes/throbber';
@@ -21,7 +21,7 @@ const DIAGNOSTICS_INDEX = 1;
 
 /** A Megascale Stats page component. */
 @Component({
-  standalone: false,
+  changeDetection: ChangeDetectionStrategy.Default,standalone: false,
   selector: 'megascale-stats',
   templateUrl: './megascale_stats.ng.html',
   styleUrls: ['./megascale_stats.scss']
@@ -39,6 +39,8 @@ export class MegascaleStats extends Dashboard implements OnDestroy {
   hostList: string[] = [];
 
   diagnostics: Diagnostics = {info: [], warnings: [], errors: []};
+
+  isExpanded = false;
 
   dataInfo: ChartDataInfo = {
     data: null,
@@ -88,6 +90,10 @@ export class MegascaleStats extends Dashboard implements OnDestroy {
   }
 
   update() {
+    if (!this.isExpanded) {
+      return;
+    }
+
     setLoadingState(true, this.store, 'Loading Megascale Stats data');
 
     this.throbber.start();
@@ -123,6 +129,15 @@ export class MegascaleStats extends Dashboard implements OnDestroy {
       ...this.dataInfo,
       filters: this.getFilters(),
     };
+  }
+
+  onPanelOpened() {
+    this.isExpanded = true;
+    this.update();
+  }
+
+  onPanelClosed() {
+    this.isExpanded = false;
   }
 
   openPerfetto() {

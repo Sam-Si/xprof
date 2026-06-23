@@ -25,9 +25,11 @@ limitations under the License.
 #include "<gtest/gtest.h>"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/tsl/platform/status.h"
 #include "xla/tsl/platform/types.h"
 #include "xla/tsl/profiler/convert/xla_op_utils.h"
+#include "xla/tsl/profiler/utils/math_utils.h"
 #include "xla/tsl/profiler/utils/tf_xplane_visitor.h"
 #include "xla/tsl/profiler/utils/xplane_builder.h"
 #include "xla/tsl/profiler/utils/xplane_schema.h"
@@ -100,12 +102,12 @@ TEST(ConvertXPlaneToOpStats, GpuPerfEnv) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStatsOptions options;
   options.generate_op_metrics_db = true;
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
-                                                   options, &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 options, &op_stats));
   const PerfEnv& perf_env = op_stats.perf_env();
   // Change to lower flops number that we do not use sum of the tensor core peak
   // flops and the cuda core peak flops together as peak flops. Only use the
@@ -136,10 +138,10 @@ TEST(ConvertXPlaneToOpStats, GpuRunEnvironment) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(
-      session_snapshot_or.value(), OpStatsOptions(), &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 OpStatsOptions(), &op_stats));
   const RunEnvironment& run_env = op_stats.run_environment();
 
   EXPECT_EQ("Nvidia GPU", run_env.device_type());
@@ -180,10 +182,10 @@ TEST(ConvertXPlaneToOpStats, CpuOnlyStepDbTest) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
-                                                   options, &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 options, &op_stats));
   const StepDatabaseResult& step_db = op_stats.step_db();
 
   EXPECT_EQ(step_db.step_sequence_size(), 1);
@@ -231,10 +233,10 @@ TEST(ConvertXPlaneToOpStats, GpuStepDbTest) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
-                                                   options, &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 options, &op_stats));
   const StepDatabaseResult& step_db = op_stats.step_db();
 
   EXPECT_EQ(step_db.step_sequence_size(), 1);
@@ -317,15 +319,15 @@ TEST(ConvertXPlaneToOpStats, TestConvertMultiXSpacesToCombinedOpStats) {
 
   auto session_snapshot_or =
       SessionSnapshot::Create(std::move(xspace_paths), std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
 
   OpStatsOptions options;
   options.generate_op_metrics_db = true;
   options.generate_step_db = true;
   OpStats combined_op_stats;
 
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
-                                                   options, &combined_op_stats))
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 options, &combined_op_stats))
       << "Failed to convert multi XSpace to OpStats";
 
   // Result OpStats has 2 Host Ops, "IDLE" and "aaa:bbb".
@@ -430,10 +432,10 @@ TEST(ConvertXPlaneToOpStats, TpuPerfEnv) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
-                                                   options, &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 options, &op_stats));
   const PerfEnv& perf_env = op_stats.perf_env();
   EXPECT_NEAR(kDevCapPeakTeraflopsPerSecond,
               perf_env.peak_tera_flops_per_second(), kMaxError);
@@ -479,10 +481,10 @@ TEST(ConvertXPlaneToOpStats, TpuRunEnvironment) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(
-      session_snapshot_or.value(), OpStatsOptions(), &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 OpStatsOptions(), &op_stats));
   const RunEnvironment& run_env = op_stats.run_environment();
 
   EXPECT_EQ("TPU V4", run_env.device_type());
@@ -530,10 +532,10 @@ TEST(ConvertXPlaneToOpStats, TpuDeviceTraceToStepDb) {
   xspaces.push_back(std::move(space));
   auto session_snapshot_or =
       SessionSnapshot::Create({"test_xspace"}, std::move(xspaces));
-  TF_CHECK_OK(session_snapshot_or.status());
+  ASSERT_OK(session_snapshot_or.status());
   OpStats op_stats;
-  TF_CHECK_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
-                                                   options, &op_stats));
+  ASSERT_OK(ConvertMultiXSpacesToCombinedOpStats(session_snapshot_or.value(),
+                                                 options, &op_stats));
   EXPECT_THAT(op_stats.device_op_metrics_db().metrics_db(),
               UnorderedElementsAre(Property(&OpMetrics::name, "op_name"),
                                    Property(&OpMetrics::name, "IDLE")));
@@ -714,6 +716,54 @@ TEST(ConvertXPlaneToOpStats, ConstructDutyCycleTrackerFromSparseCore) {
   EXPECT_EQ(tracker.GetIdleTimePs(), 10);
 }
 
+TEST(ConvertXPlaneToOpStats, ConstructDutyCycleTrackerFromCustomCall) {
+  XSpace space;
+  XPlane* device_plane = GetOrCreateTpuXPlane(
+      &space, /*device_ordinal=*/0, /*device_type=*/"TPU v4",
+      /*peak_tera_flops_per_second=*/0,
+      /*peak_hbm_bw_gigabytes_per_second=*/0);
+  XPlaneBuilder device_plane_builder(device_plane);
+  XLineBuilder op_line = device_plane_builder.GetOrCreateLine(0);
+  op_line.SetName(kXlaOpLineName);
+
+  // CustomCall with flops = 0 -> off duty
+  CreateXEvent(&device_plane_builder, &op_line, "custom_call_0_flops",
+               /*offset_ps=*/10,
+               /*duration_ps=*/10,
+               {{StatType::kHloCategory,
+                 xla::HloOpcodeString(xla::HloOpcode::kCustomCall)},
+                {StatType::kFlops, int64_t{0}}});
+
+  // CustomCall with flops > 0 -> on duty
+  CreateXEvent(&device_plane_builder, &op_line, "custom_call_with_flops",
+               /*offset_ps=*/20,
+               /*duration_ps=*/10,
+               {{StatType::kHloCategory,
+                 xla::HloOpcodeString(xla::HloOpcode::kCustomCall)},
+                {StatType::kFlops, int64_t{5}}});
+
+  // CustomCall without flops stat -> off duty
+  CreateXEvent(&device_plane_builder, &op_line, "custom_call_no_flops",
+               /*offset_ps=*/30,
+               /*duration_ps=*/10,
+               {{StatType::kHloCategory,
+                 xla::HloOpcodeString(xla::HloOpcode::kCustomCall)}});
+
+  XLineBuilder xla_module_line = device_plane_builder.GetOrCreateLine(1);
+  xla_module_line.SetName(kXlaModuleLineName);
+  CreateXEvent(&device_plane_builder, &xla_module_line, "module.1",
+               /*offset_ps=*/5,
+               /*duration_ps=*/50);
+
+  XPlaneVisitor visitor = tsl::profiler::CreateTfXPlaneVisitor(device_plane);
+  DutyCycleTracker tracker = ConstructDutyCycleTracker(visitor);
+
+  // active time is op 2 (10ps)
+  EXPECT_EQ(tracker.GetActiveTimePs(), 10);
+  // idle time is 50ps (module) - 10ps (active) = 40ps
+  EXPECT_EQ(tracker.GetIdleTimePs(), 40);
+}
+
 TEST(ConvertXPlaneToOpStats, MultiCoreChipBusyAndIdleTimeTest) {
   XSpace space;
   CoreDetails tc_core_details;
@@ -773,6 +823,319 @@ TEST(ConvertXPlaneToOpStats, MultiCoreChipBusyAndIdleTimeTest) {
                        ConvertXSpaceToOpStats(space, OpStatsOptions()));
   EXPECT_EQ(op_stats.device_op_metrics_db().idle_time_ps(), 10);
   EXPECT_EQ(op_stats.device_op_metrics_db().busy_time_ps(), 40);
+}
+
+TEST(ConvertXPlaneToOpStats, ConvertXSpaceToFlatOpMetricsDbTest) {
+  XSpace space;
+
+  auto add_module_event = [&](XPlaneBuilder& plane_builder, XLineBuilder* line,
+                              const std::string& name, int64_t start_ns,
+                              int64_t duration_ns, uint64_t offload_core_id,
+                              uint64_t tc_start_id) {
+    XEventBuilder builder =
+        line->AddEvent(*plane_builder.GetOrCreateEventMetadata(name));
+    builder.SetTimestampNs(start_ns);
+    builder.SetDurationNs(duration_ns);
+
+    builder.AddStatValue(*plane_builder.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                         start_ns * 1000);
+    builder.AddStatValue(*plane_builder.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceDurationPs)),
+                         duration_ns * 1000);
+
+    builder.AddStatValue(*plane_builder.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kOffloadCoreId)),
+                         offload_core_id);
+    builder.AddStatValue(*plane_builder.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kTcOffloadStartId)),
+                         tc_start_id);
+    return builder;
+  };
+
+  // TC Plane 0
+  XPlaneBuilder tc_plane_builder0(GetOrCreateTpuXPlane(
+      &space, /*device_ordinal=*/0, "TPU V4", 1000.0, 2000.0));
+  tc_plane_builder0.SetId(1);
+
+  XLineBuilder tc_step_line0 = tc_plane_builder0.GetOrCreateLine(0);
+  tc_step_line0.SetName(tsl::profiler::kStepLineName);
+  XEventBuilder tc_step_event0 = tc_step_line0.AddEvent(
+      *tc_plane_builder0.GetOrCreateEventMetadata("Step 1"));
+  tc_step_event0.SetTimestampNs(0);
+  tc_step_event0.SetDurationNs(10);  // 10 ns = 10000 ps
+  tc_step_event0.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                                  GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                              int64_t{0});
+  tc_step_event0.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                                  GetStatTypeStr(StatType::kDeviceDurationPs)),
+                              int64_t{10000});
+
+  XLineBuilder tc_op_line0 = tc_plane_builder0.GetOrCreateLine(1);
+  tc_op_line0.SetName(kXlaOpLineName);
+
+  XEventMetadata* tc_event_metadata =
+      tc_plane_builder0.GetOrCreateEventMetadata("tc_op_1");
+  {
+    XStat* stat = tc_event_metadata->add_stats();
+    stat->set_metadata_id(
+        tc_plane_builder0
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kProgramId))
+            ->id());
+    stat->set_uint64_value(1);
+  }
+  {
+    XStat* stat = tc_event_metadata->add_stats();
+    stat->set_metadata_id(
+        tc_plane_builder0
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kSymbolId))
+            ->id());
+    stat->set_uint64_value(1);
+  }
+  XEventBuilder tc_event = tc_op_line0.AddEvent(*tc_event_metadata);
+  tc_event.SetTimestampNs(1);  // 1 ns = 1000 ps
+  tc_event.SetDurationNs(1);   // 1 ns = 1000 ps
+  tc_event.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kOffloadCoreId)),
+                        uint64_t{2});
+  tc_event.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kTcOffloadStartId)),
+                        int64_t{10});
+  tc_event.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                        int64_t{1000});
+  tc_event.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kDeviceDurationPs)),
+                        int64_t{1000});
+
+  // Add another event to TC Plane 0
+  XEventMetadata* tc_event_metadata2 =
+      tc_plane_builder0.GetOrCreateEventMetadata("tc_op_2");
+  {
+    XStat* stat = tc_event_metadata2->add_stats();
+    stat->set_metadata_id(
+        tc_plane_builder0
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kProgramId))
+            ->id());
+    stat->set_uint64_value(1);
+  }
+  {
+    XStat* stat = tc_event_metadata2->add_stats();
+    stat->set_metadata_id(
+        tc_plane_builder0
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kSymbolId))
+            ->id());
+    stat->set_uint64_value(2);
+  }
+  XEventBuilder tc_event2 = tc_op_line0.AddEvent(*tc_event_metadata2);
+  tc_event2.SetTimestampNs(3);  // 3 ns = 3000 ps
+  tc_event2.SetDurationNs(1);   // 1 ns = 1000 ps
+  tc_event2.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                         int64_t{3000});
+  tc_event2.AddStatValue(*tc_plane_builder0.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceDurationPs)),
+                         int64_t{1000});
+
+  // SC Plane 0 (linked to TC Plane 0, event 1)
+  XPlaneBuilder sc_plane_builder0(
+      GetOrCreateTpuXPlane(&space, /*device_ordinal=*/1, "TPU V4", 0, 0));
+  sc_plane_builder0.SetId(2);
+  sc_plane_builder0.SetName("/device:TPU:0 SparseCore 0");
+  XLineBuilder sc_op_line0 = sc_plane_builder0.GetOrCreateLine(0);
+  sc_op_line0.SetName(kSparseCoreOpLineName);
+
+  XLineBuilder sc_module_line0 = sc_plane_builder0.GetOrCreateLine(1);
+  sc_module_line0.SetName(tsl::profiler::kSparseCoreModuleLineName);
+  add_module_event(sc_plane_builder0, &sc_module_line0, "Module1_sc0", 0, 5, 2,
+                   10);
+
+  XEventMetadata* sc_event_metadata =
+      sc_plane_builder0.GetOrCreateEventMetadata("sc_op_1");
+  {
+    XStat* stat = sc_event_metadata->add_stats();
+    stat->set_metadata_id(
+        sc_plane_builder0
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kProgramId))
+            ->id());
+    stat->set_uint64_value(2);
+  }
+  {
+    XStat* stat = sc_event_metadata->add_stats();
+    stat->set_metadata_id(
+        sc_plane_builder0
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kSymbolId))
+            ->id());
+    stat->set_uint64_value(1);
+  }
+  XEventBuilder sc_event = sc_op_line0.AddEvent(*sc_event_metadata);
+  sc_event.SetTimestampNs(1);  // 1 ns = 1000 ps
+  sc_event.SetDurationNs(1);   // 1 ns = 1000 ps
+  sc_event.AddStatValue(*sc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kOffloadCoreId)),
+                        int64_t{2});
+  sc_event.AddStatValue(*sc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kTcOffloadStartId)),
+                        int64_t{10});
+  sc_event.AddStatValue(*sc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                        int64_t{1000});
+  sc_event.AddStatValue(*sc_plane_builder0.GetOrCreateStatMetadata(
+                            GetStatTypeStr(StatType::kDeviceDurationPs)),
+                        int64_t{1000});
+
+  // TC Plane 1
+  XPlaneBuilder tc_plane_builder1(
+      GetOrCreateTpuXPlane(&space, /*device_ordinal=*/2, "TPU V4", 0, 0));
+  tc_plane_builder1.SetId(3);
+
+  XLineBuilder tc_step_line1 = tc_plane_builder1.GetOrCreateLine(0);
+  tc_step_line1.SetName(tsl::profiler::kStepLineName);
+  XEventBuilder tc_step_event1 = tc_step_line1.AddEvent(
+      *tc_plane_builder1.GetOrCreateEventMetadata("Step 1"));
+  tc_step_event1.SetTimestampNs(0);
+  tc_step_event1.SetDurationNs(10);
+  tc_step_event1.AddStatValue(*tc_plane_builder1.GetOrCreateStatMetadata(
+                                  GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                              int64_t{0});
+  tc_step_event1.AddStatValue(*tc_plane_builder1.GetOrCreateStatMetadata(
+                                  GetStatTypeStr(StatType::kDeviceDurationPs)),
+                              int64_t{10000});
+
+  XLineBuilder tc_op_line1 = tc_plane_builder1.GetOrCreateLine(1);
+  tc_op_line1.SetName(kXlaOpLineName);
+
+  XEventMetadata* tc_event_metadata3 =
+      tc_plane_builder1.GetOrCreateEventMetadata("tc_op_3");
+  {
+    XStat* stat = tc_event_metadata3->add_stats();
+    stat->set_metadata_id(
+        tc_plane_builder1
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kProgramId))
+            ->id());
+    stat->set_uint64_value(3);
+  }
+  {
+    XStat* stat = tc_event_metadata3->add_stats();
+    stat->set_metadata_id(
+        tc_plane_builder1
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kSymbolId))
+            ->id());
+    stat->set_uint64_value(1);
+  }
+  XEventBuilder tc_event3 = tc_op_line1.AddEvent(*tc_event_metadata3);
+  tc_event3.SetTimestampNs(2);  // 2 ns = 2000 ps
+  tc_event3.SetDurationNs(2);   // 2 ns = 2000 ps
+  tc_event3.AddStatValue(*tc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kOffloadCoreId)),
+                         uint64_t{4});
+  tc_event3.AddStatValue(*tc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kTcOffloadStartId)),
+                         int64_t{20});
+  tc_event3.AddStatValue(*tc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                         int64_t{2000});
+  tc_event3.AddStatValue(*tc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceDurationPs)),
+                         int64_t{2000});
+
+  // SC Plane 1 (linked to TC Plane 1, event 3)
+  XPlaneBuilder sc_plane_builder1(
+      GetOrCreateTpuXPlane(&space, /*device_ordinal=*/3, "TPU V4", 0, 0));
+  sc_plane_builder1.SetId(4);
+  sc_plane_builder1.SetName("/device:TPU:1 SparseCore 0");
+  XLineBuilder sc_op_line1 = sc_plane_builder1.GetOrCreateLine(0);
+  sc_op_line1.SetName(kSparseCoreOpLineName);
+
+  XLineBuilder sc_module_line1 = sc_plane_builder1.GetOrCreateLine(1);
+  sc_module_line1.SetName(tsl::profiler::kSparseCoreModuleLineName);
+  add_module_event(sc_plane_builder1, &sc_module_line1, "Module1_sc1", 0, 5, 4,
+                   20);
+
+  XEventMetadata* sc_event_metadata2 =
+      sc_plane_builder1.GetOrCreateEventMetadata("sc_op_2");
+  {
+    XStat* stat = sc_event_metadata2->add_stats();
+    stat->set_metadata_id(
+        sc_plane_builder1
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kProgramId))
+            ->id());
+    stat->set_uint64_value(4);
+  }
+  {
+    XStat* stat = sc_event_metadata2->add_stats();
+    stat->set_metadata_id(
+        sc_plane_builder1
+            .GetOrCreateStatMetadata(GetStatTypeStr(StatType::kSymbolId))
+            ->id());
+    stat->set_uint64_value(1);
+  }
+  XEventBuilder sc_event2 = sc_op_line1.AddEvent(*sc_event_metadata2);
+  sc_event2.SetTimestampNs(2);  // 2 ns = 2000 ps
+  sc_event2.SetDurationNs(2);   // 2 ns = 2000 ps
+  sc_event2.AddStatValue(*sc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kOffloadCoreId)),
+                         int64_t{4});
+  sc_event2.AddStatValue(*sc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kTcOffloadStartId)),
+                         int64_t{20});
+  sc_event2.AddStatValue(*sc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceOffsetPs)),
+                         int64_t{2000});
+  sc_event2.AddStatValue(*sc_plane_builder1.GetOrCreateStatMetadata(
+                             GetStatTypeStr(StatType::kDeviceDurationPs)),
+                         int64_t{2000});
+
+  OpStatsOptions options;
+  options.generate_op_metrics_db = true;
+  auto flat_op_metrics_db_or = ConvertXSpaceToFlatOpMetricsDb(space, options);
+
+  ASSERT_TRUE(flat_op_metrics_db_or.ok());
+  OpStats op_stats = *flat_op_metrics_db_or;
+  const FlatOpMetricsDb& flat_op_metrics_db =
+      op_stats.flat_device_op_metrics_db();
+
+  // Verify field on OpStats instead of FlatOpMetricsDb
+  EXPECT_EQ(op_stats.run_environment().device_type(), "TPU V4");
+
+  // Verify PerfEnv on OpStats instead of FlatOpMetricsDb
+  EXPECT_EQ(op_stats.perf_env().peak_tera_flops_per_second(), 1000.0);
+  EXPECT_EQ(op_stats.perf_env().peak_bws_giga_bytes_per_second(0), 2000.0);
+
+  // We expect at least 5 instances
+  EXPECT_GE(flat_op_metrics_db.op_instances_size(), 5);
+
+  // Verify specific instances
+  bool found_tc_op_1 = false;
+  bool found_tc_op_2 = false;
+  bool found_tc_op_3 = false;
+  bool found_sc_op_1 = false;
+  bool found_sc_op_2 = false;
+
+  for (const auto& op : flat_op_metrics_db.op_instances()) {
+    if (op.hlo_name() == "tc_op_1") {
+      found_tc_op_1 = true;
+      EXPECT_EQ(op.time_ps(), 1000);
+    } else if (op.hlo_name() == "tc_op_2") {
+      found_tc_op_2 = true;
+      EXPECT_EQ(op.time_ps(), 1000);
+    } else if (op.hlo_name() == "tc_op_3") {
+      found_tc_op_3 = true;
+      EXPECT_EQ(op.time_ps(), 2000);
+    } else if (op.hlo_name() == "sc_op_1") {
+      found_sc_op_1 = true;
+      EXPECT_EQ(op.time_ps(), 1000);
+    } else if (op.hlo_name() == "sc_op_2") {
+      found_sc_op_2 = true;
+      EXPECT_EQ(op.time_ps(), 2000);
+    }
+  }
+
+  EXPECT_TRUE(found_tc_op_1);
+  EXPECT_TRUE(found_tc_op_2);
+  EXPECT_TRUE(found_tc_op_3);
+  EXPECT_TRUE(found_sc_op_1);
+  EXPECT_TRUE(found_sc_op_2);
 }
 
 TEST(ConvertXPlaneToOpStats, HandleSparseCoreBusyOpMetrics) {
@@ -953,6 +1316,48 @@ TEST(ConvertXPlaneToOpStats, HandleInputPipelineSlownessCausingDeviceIdleness) {
   EXPECT_EQ(step_breakdown.category_ps().at("infeed"), 2000);
   ASSERT_TRUE(category_ps.contains("arithmetic"));
   EXPECT_EQ(step_breakdown.category_ps().at("arithmetic"), 8000);
+}
+
+TEST(ConvertXPlaneToOpStats,
+     MissingExpectedEventsDoesNotPopulateDisaggregatedServingLatency) {
+  XSpace space;
+  XPlaneBuilder host_plane_builder(GetOrCreateHostXPlane(&space));
+  // Not a wiz inference request, so disaggregated_serving_latency should be
+  // empty.
+  ASSERT_OK_AND_ASSIGN(OpStats op_stats,
+                       ConvertXSpaceToOpStats(space, OpStatsOptions()));
+  ASSERT_FALSE(op_stats.has_disaggregated_serving_latency());
+
+  // Make it a wiz inference request but without jit_generate events.
+  XLineBuilder line = host_plane_builder.GetOrCreateLine(0);
+  CreateXEvent(&host_plane_builder, &line, "WizServable", 0, 100);
+  ASSERT_OK_AND_ASSIGN(op_stats,
+                       ConvertXSpaceToOpStats(space, OpStatsOptions()));
+  ASSERT_FALSE(op_stats.has_disaggregated_serving_latency());
+}
+
+TEST(ConvertXPlaneToOpStats, PopulateDisaggregatedServingLatency) {
+  XSpace space;
+  XPlaneBuilder host_plane_builder(GetOrCreateHostXPlane(&space));
+  XLineBuilder host_line = host_plane_builder.GetOrCreateLine(0);
+  CreateXEvent(&host_plane_builder, &host_line, "WizServable", 0, 100);
+
+  XPlaneBuilder device_plane_builder(
+      GetOrCreateTpuXPlane(&space, 0, "TPU V4", 0, 0));
+  XLineBuilder device_line = device_plane_builder.GetOrCreateLine(0);
+  device_line.SetName(kXlaModuleLineName);
+  int duration_ps = 2000000;
+  CreateXEvent(&device_plane_builder, &device_line, "jit_generate", 100,
+               duration_ps);
+
+  ASSERT_OK_AND_ASSIGN(OpStats op_stats,
+                       ConvertXSpaceToOpStats(space, OpStatsOptions()));
+  ASSERT_TRUE(op_stats.has_disaggregated_serving_latency());
+  ASSERT_EQ(op_stats.disaggregated_serving_latency().num_decode_steps(), 1);
+  double expected_avg_duration_us = tsl::profiler::PicoToMicro(duration_ps);
+  ASSERT_EQ(
+      op_stats.disaggregated_serving_latency().decode_step_time_us().avg(),
+      expected_avg_duration_us);
 }
 
 }  // namespace

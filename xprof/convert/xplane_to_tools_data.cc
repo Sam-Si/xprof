@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "xprof/convert/xplane_to_tools_data.h"
 
-#include <cmath>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,19 +23,18 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/numbers.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "google/protobuf/arena.h"
+#include "google/protobuf/json/json.h"
 #include "xla/service/hlo.pb.h"
 #include "xla/tsl/platform/env.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/file_system.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/profiler/convert/xplane_to_trace_events.h"
-#include "xla/tsl/profiler/utils/timespan.h"
-#include "xla/tsl/profiler/utils/xplane_schema.h"
-#include "xla/tsl/profiler/utils/xplane_utils.h"
 #include "tsl/profiler/protobuf/xplane.pb.h"
 #include "xprof/convert/framework_op_stats_processor.h"
 #include "xprof/convert/hlo_stats_processor.h"
@@ -53,21 +50,17 @@ limitations under the License.
 #include "xprof/convert/process_megascale_dcn.h"
 #include "xprof/convert/repository.h"
 #include "xprof/convert/roofline_model_processor.h"
-#include "xprof/convert/smart_suggestion/all_rules.h"
-#include "xprof/convert/smart_suggestion/signal_provider.h"
-#include "xprof/convert/smart_suggestion/smart_suggestion_engine.h"
-#include "xprof/convert/smart_suggestion/smart_suggestion_rule_factory.h"
-#include "xprof/convert/smart_suggestion/tool_data_provider_impl.h"
+#include "xprof/convert/smart_suggestion_processor.h"
 #include "xprof/convert/tool_options.h"
+#include "xprof/convert/trace_view_options.h"
 #include "xprof/convert/trace_viewer/trace_events.h"
 #include "xprof/convert/trace_viewer/trace_events_to_json.h"
 #include "xprof/convert/trace_viewer/trace_options.h"
-#include "xprof/convert/trace_viewer/trace_viewer_visibility.h"
+#include "xprof/convert/unified_session_snapshot.h"
 #include "xprof/convert/xplane_to_dcn_collective_stats.h"
 #include "xprof/convert/xplane_to_hlo.h"
 #include "xprof/convert/xplane_to_memory_profile.h"
 #include "xprof/convert/xplane_to_perf_counters.h"
-#include "xprof/convert/xplane_to_tf_data_stats.h"
 #include "xprof/convert/xplane_to_tool_names.h"
 #include "xprof/convert/xplane_to_trace_container.h"
 #include "xprof/convert/xplane_to_utilization_viewer.h"
@@ -89,50 +82,13 @@ namespace profiler {
 
 namespace {
 
-struct TraceViewOption {
-  uint64_t resolution = 0;
-  double start_time_ms = 0.0;
-  double end_time_ms = 0.0;
-  std::string event_name = "";
-  std::string search_prefix = "";
-  double duration_ms = 0.0;
-  uint64_t unique_id = 0;
-};
-
-absl::StatusOr<TraceViewOption> GetTraceViewOption(const ToolOptions& options) {
-  TraceViewOption trace_options;
-  auto start_time_ms_opt =
-      GetParamWithDefault<std::string>(options, "start_time_ms", "0.0");
-  auto end_time_ms_opt =
-      GetParamWithDefault<std::string>(options, "end_time_ms", "0.0");
-  auto resolution_opt =
-      GetParamWithDefault<std::string>(options, "resolution", "0");
-  trace_options.event_name =
-      GetParamWithDefault<std::string>(options, "event_name", "");
-  trace_options.search_prefix =
-      GetParamWithDefault<std::string>(options, "search_prefix", "");
-  auto duration_ms_opt =
-      GetParamWithDefault<std::string>(options, "duration_ms", "0.0");
-  auto unique_id_opt =
-      GetParamWithDefault<std::string>(options, "unique_id", "0");
-
-  if (!absl::SimpleAtoi(resolution_opt, &trace_options.resolution) ||
-      !absl::SimpleAtod(start_time_ms_opt, &trace_options.start_time_ms) ||
-      !absl::SimpleAtod(end_time_ms_opt, &trace_options.end_time_ms) ||
-      !absl::SimpleAtoi(unique_id_opt, &trace_options.unique_id) ||
-      !absl::SimpleAtod(duration_ms_opt, &trace_options.duration_ms)) {
-    return tsl::errors::InvalidArgument("wrong arguments");
-  }
-  return trace_options;
-}
-
 absl::StatusOr<std::string> ConvertXSpaceToTraceEvents(
     const SessionSnapshot& session_snapshot, const absl::string_view tool_name,
     const ToolOptions& options) {
   if (session_snapshot.XSpaceSize() != 1) {
-    return tsl::errors::InvalidArgument(
-        "Trace events tool expects only 1 XSpace path but gets ",
-        session_snapshot.XSpaceSize());
+    return absl::InvalidArgumentError(
+        absl::StrCat("Trace events tool expects only 1 XSpace path but gets ",
+                     session_snapshot.XSpaceSize()));
   }
 
   google::protobuf::Arena arena;
@@ -144,22 +100,29 @@ absl::StatusOr<std::string> ConvertXSpaceToTraceEvents(
     tsl::profiler::ConvertXSpaceToTraceEventsString(*xspace, &content);
     return content;
   } else {  // streaming trace viewer.
+    TF_ASSIGN_OR_RETURN(TraceViewOption trace_option,
+                        GetTraceViewOption(options));
+    tensorflow::profiler::TraceOptions profiler_trace_options =
+        TraceOptionsFromToolOptions(options);
     std::string host_name = session_snapshot.GetHostname(0);
-    auto trace_events_sstable_path = session_snapshot.MakeHostDataFilePath(
-        StoredDataType::TRACE_LEVELDB, host_name);
-    auto trace_events_metadata_sstable_path =
+    std::optional<std::string> trace_events_sstable_path =
+        session_snapshot.MakeHostDataFilePath(StoredDataType::TRACE_LEVELDB,
+                                              host_name);
+    std::optional<std::string> trace_events_metadata_sstable_path =
         session_snapshot.MakeHostDataFilePath(
             StoredDataType::TRACE_EVENTS_METADATA_LEVELDB, host_name);
-    auto trace_events_prefix_trie_sstable_path =
+    std::optional<std::string> trace_events_prefix_trie_sstable_path =
         session_snapshot.MakeHostDataFilePath(
             StoredDataType::TRACE_EVENTS_PREFIX_TRIE_LEVELDB, host_name);
     if (!trace_events_sstable_path || !trace_events_metadata_sstable_path ||
         !trace_events_prefix_trie_sstable_path) {
-      return tsl::errors::Unimplemented(
+      return absl::UnimplementedError(
           "streaming trace viewer hasn't been supported in Cloud AI");
     }
     if (!tsl::Env::Default()->FileExists(*trace_events_sstable_path).ok()) {
-      ProcessMegascaleDcn(xspace);
+      if (profiler_trace_options.enable_legacy_dcn) {
+        ProcessMegascaleDcn(xspace);
+      }
       TraceEventsContainer trace_container;
       // No-op method which will be deprecated in the future, thus added
       // /*host_id=*/1 as a placeholder for now.
@@ -186,41 +149,9 @@ absl::StatusOr<std::string> ConvertXSpaceToTraceEvents(
         *trace_events_metadata_sstable_path;
     file_paths.trace_events_prefix_trie_file_path =
         *trace_events_prefix_trie_sstable_path;
-    TF_ASSIGN_OR_RETURN(TraceViewOption trace_option,
-                        GetTraceViewOption(options));
-    tensorflow::profiler::TraceOptions profiler_trace_options =
-        TraceOptionsFromToolOptions(options);
     TraceEventsContainer trace_container;
-    // Fetch Args Request.
-    if (!trace_option.event_name.empty()) {
-      TF_RETURN_IF_ERROR(trace_container.ReadFullEventFromLevelDbTable(
-          *trace_events_metadata_sstable_path, *trace_events_sstable_path,
-          trace_option.event_name,
-          static_cast<uint64_t>(std::round(trace_option.start_time_ms * 1E9)),
-          static_cast<uint64_t>(std::round(trace_option.duration_ms * 1E9)),
-          trace_option.unique_id));
-    } else if (!trace_option.search_prefix.empty()) {  // Search Events Request
-      if (tsl::Env::Default()
-              ->FileExists(*trace_events_prefix_trie_sstable_path).ok()) {
-        auto trace_events_filter =
-            CreateTraceEventsFilterFromTraceOptions(profiler_trace_options);
-        TF_RETURN_IF_ERROR(trace_container.SearchInLevelDbTable(
-            file_paths,
-            trace_option.search_prefix, std::move(trace_events_filter)));
-      }
-    } else {
-      auto visibility_filter = std::make_unique<TraceVisibilityFilter>(
-          tsl::profiler::MilliSpan(trace_option.start_time_ms,
-                                   trace_option.end_time_ms),
-          trace_option.resolution, profiler_trace_options);
-      // Trace smaller than threshold will be disabled from streaming.
-      constexpr int64_t kDisableStreamingThreshold = 500000;
-      auto trace_events_filter =
-          CreateTraceEventsFilterFromTraceOptions(profiler_trace_options);
-      TF_RETURN_IF_ERROR(trace_container.LoadFromLevelDbTable(
-          file_paths, std::move(trace_events_filter),
-          std::move(visibility_filter), kDisableStreamingThreshold));
-    }
+    TF_RETURN_IF_ERROR(LoadTraceEventsContainer(
+        file_paths, trace_option, profiler_trace_options, &trace_container));
     JsonTraceOptions json_trace_options;
 
     tensorflow::profiler::TraceDeviceType device_type =
@@ -269,9 +200,9 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToKernelStats(
 absl::StatusOr<std::string> ConvertXSpaceToMemoryProfile(
     const SessionSnapshot& session_snapshot) {
   if (session_snapshot.XSpaceSize() != 1) {
-    return tsl::errors::InvalidArgument(
-        "Memory profile tool expects only 1 XSpace path but gets ",
-        session_snapshot.XSpaceSize());
+    return absl::InvalidArgumentError(
+        absl::StrCat("Memory profile tool expects only 1 XSpace path but gets ",
+                     session_snapshot.XSpaceSize()));
   }
 
   std::string json_output;
@@ -288,34 +219,6 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToPodViewer(
   xprof::PodViewerProcessor processor({});
   TF_RETURN_IF_ERROR(processor.ProcessSession(session_snapshot, {}));
   return processor.GetData();
-}
-
-absl::StatusOr<std::string> ConvertMultiXSpacesToTfDataBottleneckAnalysis(
-    const SessionSnapshot& session_snapshot) {
-  CombinedTfDataStats combined_tf_data_stats;
-  CombinedTfDataStatsBuilder builder(&combined_tf_data_stats);
-
-  for (int idx = 0; idx < session_snapshot.XSpaceSize(); ++idx) {
-    google::protobuf::Arena arena;
-    TF_ASSIGN_OR_RETURN(XSpace* xspace,
-                        session_snapshot.GetXSpace(idx, &arena));
-
-    PreprocessSingleHostXSpace(xspace, /*step_grouping=*/true,
-                               /*derived_timeline=*/false);
-    XPlane* host_plane = tsl::profiler::FindMutablePlaneWithName(
-        xspace, tsl::profiler::kHostThreadsPlaneName);
-    std::string host_name_from_file = session_snapshot.GetHostname(idx);
-    if (host_plane == nullptr) {
-      return tsl::errors::InvalidArgument(
-          "Could not find host XPlane for tf data stats: ",
-          host_name_from_file);
-    }
-    absl::string_view host_name =
-        xspace->hostnames_size() ? xspace->hostnames(0) : host_name_from_file;
-    builder.Add(host_name, host_plane);
-  }
-  builder.Finalize();
-  return combined_tf_data_stats.SerializeAsString();
 }
 
 absl::StatusOr<std::string> ConvertMultiXSpacesToHloStats(
@@ -352,8 +255,8 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToOpProfileViewer(
       tsl::protobuf::util::MessageToJsonString(profile, &json_output, opts);
   if (!encode_status.ok()) {
     const auto& error_message = encode_status.message();
-    return tsl::errors::Internal(
-        "Could not convert op profile proto to json. Error: ", error_message);
+    return absl::InternalError(absl::StrCat(
+        "Could not convert op profile proto to json. Error: ", error_message));
   }
   return json_output;
 }
@@ -361,9 +264,9 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToOpProfileViewer(
 absl::StatusOr<std::string> PreprocessXSpace(
     const SessionSnapshot& session_snapshot) {
   if (session_snapshot.XSpaceSize() != 1) {
-    return tsl::errors::InvalidArgument(
+    return absl::InvalidArgumentError(absl::StrCat(
         "PreprocessXSpace tool expects only 1 XSpace path but gets ",
-        session_snapshot.XSpaceSize());
+        session_snapshot.XSpaceSize()));
   }
 
   google::protobuf::Arena arena;
@@ -404,31 +307,10 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToInferenceStats(
 }
 
 absl::StatusOr<std::string> ConvertMultiXSpacesToSmartSuggestion(
-    const SessionSnapshot& session_snapshot) {
-  SmartSuggestionEngine engine;
-  SmartSuggestionRuleFactory rule_factory;
-  RegisterAllRulesFor3P(&rule_factory);
-
-  auto tool_data_provider =
-      std::make_unique<ToolDataProviderImpl>(session_snapshot);
-  SignalProvider signal_provider(std::move(tool_data_provider));
-
-  TF_ASSIGN_OR_RETURN(SmartSuggestionReport report,
-                      engine.Run(signal_provider, rule_factory));
-  std::string json_output;
-  tsl::protobuf::util::JsonPrintOptions opts;
-  opts.always_print_fields_with_no_presence = true;
-  // Perform the Proto to JSON conversion.
-  auto encode_status =
-      tsl::protobuf::util::MessageToJsonString(report, &json_output, opts);
-  if (!encode_status.ok()) {
-    const auto& error_message = encode_status.message();
-    return tsl::errors::Internal(
-        "Could not convert smart suggestion report to json. Error: ",
-        absl::string_view(error_message.data(), error_message.length()));
-  }
-  // Return the generated JSON string.
-  return json_output;
+    const SessionSnapshot& session_snapshot, const ToolOptions& options) {
+  xprof::SmartSuggestionProcessor processor(options);
+  TF_RETURN_IF_ERROR(processor.ProcessSession(session_snapshot, options));
+  return processor.GetData();
 }
 
 }  // namespace
@@ -484,12 +366,12 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToToolData(
   } else if (tool_name == "inference_profile") {
     tool_data = ConvertMultiXSpacesToInferenceStats(session_snapshot, options);
   } else if (tool_name == "smart_suggestion") {
-    tool_data = ConvertMultiXSpacesToSmartSuggestion(session_snapshot);
+    tool_data = ConvertMultiXSpacesToSmartSuggestion(session_snapshot, options);
   } else if (tool_name == "utilization_viewer") {
     if (session_snapshot.XSpaceSize() != 1) {
-      tool_data = tsl::errors::InvalidArgument(
+      tool_data = absl::InvalidArgumentError(absl::StrCat(
           "Utilization viewer tool expects only 1 XSpace path but gets ",
-          session_snapshot.XSpaceSize());
+          session_snapshot.XSpaceSize()));
     } else {
       google::protobuf::Arena arena;
       auto xspace = session_snapshot.GetXSpace(0, &arena);
@@ -502,9 +384,9 @@ absl::StatusOr<std::string> ConvertMultiXSpacesToToolData(
       }
     }
   } else {
-    tool_data = tsl::errors::InvalidArgument(
-        "Can not find tool: ", tool_name,
-        ". Please update to the latest version of Tensorflow.");
+    tool_data = absl::InvalidArgumentError(
+        absl::StrCat("Can not find tool: ", tool_name,
+                     ". Please update to the latest version of Tensorflow."));
   }
 
   LOG(INFO) << "serving tool: " << tool_name << " session_id: " << session_id

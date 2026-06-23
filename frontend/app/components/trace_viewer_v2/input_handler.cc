@@ -1,36 +1,37 @@
-#include "xprof/frontend/app/components/trace_viewer_v2/input_handler.h"
+#include "frontend/app/components/trace_viewer_v2/input_handler.h"
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 
 #include "absl/strings/string_view.h"
-#include "third_party/dear_imgui/imgui.h"
-#include "util/gtl/flat_map.h"
+#include "imgui.h"
+#include "frontend/app/components/trace_viewer_v2/scheduler.h"
 
 namespace traceviewer {
 
 namespace {
 
 ImGuiKey TranslateKey(absl::string_view code) {
-  static constexpr auto kKeyMap =
-      gtl::fixed_flat_map_of<absl::string_view, ImGuiKey>(
-          {{"KeyA", ImGuiKey_A},
-           {"KeyD", ImGuiKey_D},
-           {"KeyS", ImGuiKey_S},
-           {"KeyW", ImGuiKey_W},
-           {"ArrowDown", ImGuiKey_DownArrow},
-           {"ArrowUp", ImGuiKey_UpArrow},
-           {"Escape", ImGuiKey_Escape}});
-  if (auto it = kKeyMap.find(code); it != kKeyMap.end()) return it->second;
+  if (code == "KeyA") return ImGuiKey_A;
+  if (code == "KeyD") return ImGuiKey_D;
+  if (code == "KeyS") return ImGuiKey_S;
+  if (code == "KeyW") return ImGuiKey_W;
+  if (code == "ArrowDown") return ImGuiKey_DownArrow;
+  if (code == "ArrowUp") return ImGuiKey_UpArrow;
+  if (code == "Digit1") return ImGuiKey_1;
+  if (code == "Digit2") return ImGuiKey_2;
+  if (code == "Digit3") return ImGuiKey_3;
+  if (code == "Digit4") return ImGuiKey_4;
+  if (code == "Escape") return ImGuiKey_Escape;
   return ImGuiKey_None;
 }
 
 void UpdateModifierKeys(const EmscriptenKeyboardEvent* event) {
   ImGuiIO& io = ImGui::GetIO();
-  io.AddKeyEvent(ImGuiMod_Ctrl, event->ctrlKey);
-  io.AddKeyEvent(ImGuiMod_Shift, event->shiftKey);
-  io.AddKeyEvent(ImGuiMod_Alt, event->altKey);
-  io.AddKeyEvent(ImGuiMod_Super, event->metaKey);
+    io.AddKeyEvent(ImGuiKey_ModCtrl, event->ctrlKey);
+    io.AddKeyEvent(ImGuiKey_ModShift, event->shiftKey);
+    io.AddKeyEvent(ImGuiKey_ModAlt, event->altKey);
+    io.AddKeyEvent(ImGuiKey_ModSuper, event->metaKey);
 }
 
 }  // namespace
@@ -46,11 +47,33 @@ int IsActiveElementInput() {
   });
 }
 
+// Input Event Handlers
+//
+// Common behavior for all the following input handlers:
+//
+// 1. Redraw Requests:
+//    All handlers unconditionally request a redraw for the next animation frame
+//    via Scheduler::Instance().RequestRedraw(). Since drawing is asynchronous
+//    (scheduled for the next frame), the input updates processed here will be
+//    correctly applied before that frame is rendered.
+//
+// 2. Return Values (Event Propagation):
+//    The return value (EM_BOOL) indicates whether the event was handled:
+//    - EM_TRUE (true): The event was handled and should NOT be propagated.
+//    - EM_FALSE (false): The event was not handled and SHOULD be propagated to
+//      other listeners (e.g., browser default behavior).
+
 EM_BOOL HandleKeyDown(int, const EmscriptenKeyboardEvent* event, void*) {
+  Scheduler::Instance().RequestRedraw();
   UpdateModifierKeys(event);
 
   // If a native input element has focus, do not let ImGui capture the keyboard.
   if (IsActiveElementInput()) {
+    return false;
+  }
+
+  // Always let the browser handle Tab navigation.
+  if (absl::string_view(event->code) == "Tab") {
     return false;
   }
 
@@ -62,10 +85,16 @@ EM_BOOL HandleKeyDown(int, const EmscriptenKeyboardEvent* event, void*) {
 }
 
 EM_BOOL HandleKeyUp(int, const EmscriptenKeyboardEvent* event, void*) {
+  Scheduler::Instance().RequestRedraw();
   UpdateModifierKeys(event);
 
   // If a native input element has focus, do not let ImGui capture the keyboard.
   if (IsActiveElementInput()) {
+    return false;
+  }
+
+  // Always let the browser handle Tab navigation.
+  if (absl::string_view(event->code) == "Tab") {
     return false;
   }
 
@@ -77,29 +106,33 @@ EM_BOOL HandleKeyUp(int, const EmscriptenKeyboardEvent* event, void*) {
 }
 
 EM_BOOL HandleMouseMove(int, const EmscriptenMouseEvent* event, void*) {
+  Scheduler::Instance().RequestRedraw();
   ImGuiIO& io = ImGui::GetIO();
   io.AddMousePosEvent(event->targetX, event->targetY);
   return io.WantCaptureMouse;
 }
 
 EM_BOOL HandleMouseDown(int, const EmscriptenMouseEvent* event, void*) {
+  Scheduler::Instance().RequestRedraw();
   ImGuiIO& io = ImGui::GetIO();
   io.AddMouseButtonEvent(event->button, true);
   return io.WantCaptureMouse;
 }
 
 EM_BOOL HandleMouseUp(int, const EmscriptenMouseEvent* event, void*) {
+  Scheduler::Instance().RequestRedraw();
   ImGuiIO& io = ImGui::GetIO();
   io.AddMouseButtonEvent(event->button, false);
   return io.WantCaptureMouse;
 }
 
 EM_BOOL HandleWheel(int, const EmscriptenWheelEvent* event, void*) {
+  Scheduler::Instance().RequestRedraw();
   ImGuiIO& io = ImGui::GetIO();
 
-  io.AddKeyEvent(ImGuiMod_Ctrl, event->mouse.ctrlKey);
-  io.AddKeyEvent(ImGuiMod_Shift, event->mouse.shiftKey);
-  io.AddKeyEvent(ImGuiMod_Super, event->mouse.metaKey);
+    io.AddKeyEvent(ImGuiKey_ModCtrl, event->mouse.ctrlKey);
+    io.AddKeyEvent(ImGuiKey_ModShift, event->mouse.shiftKey);
+    io.AddKeyEvent(ImGuiKey_ModSuper, event->mouse.metaKey);
 
   float wheel_x = static_cast<float>(event->deltaX);
   float wheel_y = static_cast<float>(event->deltaY);

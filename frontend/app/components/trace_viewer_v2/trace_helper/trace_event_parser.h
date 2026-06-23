@@ -3,7 +3,9 @@
 
 #include <emscripten/val.h>
 
-#include "xprof/frontend/app/components/trace_viewer_v2/trace_helper/trace_event.h"
+#include "absl/strings/string_view.h"
+#include "tsl/profiler/lib/context_types.h"
+#include "frontend/app/components/trace_viewer_v2/trace_helper/trace_event.h"
 
 namespace traceviewer {
 
@@ -11,8 +13,11 @@ ParsedTraceEvents ParseTraceEvents(
     const emscripten::val& trace_data,
     const emscripten::val& visible_range_from_url);
 
-// Parses trace data containing search results and updates the timeline.
-void SetSearchResultsInWasm(const emscripten::val& trace_data);
+// Converts a string category to its corresponding ContextType enum.
+tsl::profiler::ContextType GetContextTypeFromString(absl::string_view category);
+
+// Returns all flow categories.
+emscripten::val GetAllFlowCategories();
 
 }  // namespace traceviewer
 

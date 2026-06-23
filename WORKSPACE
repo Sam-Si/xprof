@@ -49,17 +49,16 @@ cc_library(
 
 http_archive(
     name = "com_github_googlecloudplatform_google_cloud_cpp",
-    patch_args = ["-p1"],
-    patches = ["//third_party:google_cloud_cpp.patch"],
     repo_mapping = {
         "@com_github_curl_curl": "@curl",
-        "@com_github_nlohmann_json": "@nlohmann_json",
-        "@nlohmann_json": "@nlohmann_json",
         "@abseil-cpp": "@com_google_absl",
     },
     sha256 = "e868bdb537121d2169fbc1ef69b81f4b4f96e97891c4567a6533d4adf62bffde",
     strip_prefix = "google-cloud-cpp-3.1.0",
-    urls = ["https://github.com/googleapis/google-cloud-cpp/archive/v3.1.0.tar.gz"],
+    urls = [
+        "http://mirror.tensorflow.org/github.com/googleapis/google-cloud-cpp/archive/v3.1.0.tar.gz",
+        "https://github.com/googleapis/google-cloud-cpp/archive/v3.1.0.tar.gz",
+    ],
 )
 
 # XLA uses an old (2019) version of rules_closure, while Tensorboard requires a newer (2024) version.
@@ -87,10 +86,10 @@ http_archive(
 # Details: https://github.com/google-ml-infra/rules_ml_toolchain
 http_archive(
     name = "rules_ml_toolchain",
-    sha256 = "2a5591ec7543c8b37aead3cb681eb2b93c9616ce94abdf3aedcf391b372d4007",
-    strip_prefix = "rules_ml_toolchain-b2b08356ac30353c49587b0e8dfe65aabb35e78d",
+    sha256 = "40963e4bc262dfa9a43146f610140af0068b023ace8f3c50f1705a7b50de0830",
+    strip_prefix = "rules_ml_toolchain-cad1047facbac4fb3c1124da68bf2cb36c7eb9ac",
     urls = [
-        "https://github.com/google-ml-infra/rules_ml_toolchain/archive/b2b08356ac30353c49587b0e8dfe65aabb35e78d.tar.gz",
+        "https://github.com/google-ml-infra/rules_ml_toolchain/archive/cad1047facbac4fb3c1124da68bf2cb36c7eb9ac.tar.gz",
     ],
 )
 
@@ -120,10 +119,10 @@ http_archive(
     name = "xla",
     patch_args = ["-p1"],
     patches = ["//third_party:xla.patch"],
-    sha256 = "641de37923d00f4d91238911b784c94973bea6ebb76b6f01746fb3d95d47ea00",
-    strip_prefix = "xla-a085ce021f5d26d1ccc762543ccc56d5eace2cfb",
+    sha256 = "89b3ab50d597eff6dfe4a54b6421a6da0dded0015ba451b3f47278ba9e1b80bc",
+    strip_prefix = "xla-078ac5263c44f096b66d3d8b5b1cb0a4c9ce3b5e",
     urls = [
-        "https://github.com/openxla/xla/archive/a085ce021f5d26d1ccc762543ccc56d5eace2cfb.zip",
+        "https://github.com/openxla/xla/archive/078ac5263c44f096b66d3d8b5b1cb0a4c9ce3b5e.zip",
     ],
 )
 
@@ -198,7 +197,7 @@ load(
 python_wheel_version_suffix_repository(name = "tf_wheel_version_suffix")
 
 load(
-    "@rules_ml_toolchain//third_party/gpus/cuda/hermetic:cuda_json_init_repository.bzl",
+    "@rules_ml_toolchain//gpu/cuda:cuda_json_init_repository.bzl",
     "cuda_json_init_repository",
 )
 
@@ -210,7 +209,7 @@ load(
     "CUDNN_REDISTRIBUTIONS",
 )
 load(
-    "@rules_ml_toolchain//third_party/gpus/cuda/hermetic:cuda_redist_init_repositories.bzl",
+    "@rules_ml_toolchain//gpu/cuda:cuda_redist_init_repositories.bzl",
     "cuda_redist_init_repositories",
     "cudnn_redist_init_repository",
 )
@@ -224,7 +223,7 @@ cudnn_redist_init_repository(
 )
 
 load(
-    "@rules_ml_toolchain//third_party/gpus/cuda/hermetic:cuda_configure.bzl",
+    "@rules_ml_toolchain//gpu/cuda:cuda_configure.bzl",
     "cuda_configure",
 )
 
@@ -297,6 +296,7 @@ load("@build_bazel_rules_nodejs//:index.bzl", "yarn_install")
 
 yarn_install(
     name = "npm",
+    data = ["//:patch_keys.py"],
     # "Some rules only work by referencing labels nested inside npm packages
     # and therefore require turning off exports_directories_only."
     # This includes "ts_library".
@@ -363,6 +363,9 @@ http_archive(
 
 http_archive(
     name = "emsdk",
+    # TODO(b/490301506): Remove this patch once emsdk version is upgraded
+    patch_args = ["-p0"],
+    patches = ["//third_party:emsdk.patch"],
     sha256 = "2d3292d508b4f5477f490b080b38a34aaefed43e85258a1de72cb8dde3f8f3af",
     strip_prefix = "emsdk-4.0.6/bazel",
     url = "https://github.com/emscripten-core/emsdk/archive/4.0.6.tar.gz",
@@ -375,3 +378,82 @@ emsdk_deps()
 load("@emsdk//:emscripten_deps.bzl", emsdk_emscripten_deps = "emscripten_deps")
 
 emsdk_emscripten_deps()
+
+http_archive(
+    name = "imgui",
+    build_file_content = """
+licenses(["notice"])
+cc_library(
+    name = "imgui",
+    srcs = glob(["*.cpp"], exclude=["backends/**", "misc/**"]),
+    hdrs = glob(["*.h"]),
+    copts = [
+        "-I.",
+    ],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+cc_library(
+    name = "imgui_freetype",
+    srcs = ["misc/freetype/imgui_freetype.cpp"],
+    hdrs = ["misc/freetype/imgui_freetype.h"],
+    copts = [
+        "-I.",
+        "-DFREETYPE_GLYPH_RANGES=1",
+    ],
+    includes = ["."],
+    linkopts = ["-sUSE_FREETYPE=1"],
+    visibility = ["//visibility:public"],
+    deps = [":imgui"],
+)
+""",
+    sha256 = "81087a74599e5890a07b636887cee73a7dc1a9eb9e1f19a4a0d82a76090bf4c2",
+    strip_prefix = "imgui-1.88",
+    urls = ["https://github.com/ocornut/imgui/archive/v1.88.zip"],
+)
+
+http_archive(
+    name = "emdawnwebgpu",
+    build_file_content = """
+licenses(["notice"])
+
+cc_library(
+    name = "webgpu",
+    srcs = glob(
+        ["**/*.cpp"],
+        exclude = [
+            "**/android/**",
+            "**/jni/**",
+            "**/art/**",
+            "examples/**",
+            "generator/**",
+            "tests/**",
+            "src/dawn/tests/**",
+            "src/dawn/common/IOSurfaceUtils.cpp",
+            "src/dawn/utils/OSXTimer.cpp",
+        ],
+    ),
+    hdrs = glob(["**/*.h"]),
+    includes = [
+        "include",
+        "src",
+        "src/dawn/include",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log",
+    ],
+)
+""",
+    sha256 = "f49683605487f62e1c9e32ed0d71a3ed3029993f818f5a97f13f8266c39b0004",
+    strip_prefix = "dawn-20250713.025201",
+    urls = ["https://github.com/google/dawn/archive/v20250713.025201.tar.gz"],
+)
+
+load("@emsdk//:toolchains.bzl", "register_emscripten_toolchains")
+
+# TODO(jonahweaver): Remove this once Emscripten toolchains are properly supported by Bazel.
+
+register_emscripten_toolchains()

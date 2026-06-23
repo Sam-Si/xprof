@@ -71,13 +71,13 @@ absl::Status MegascaleStatsProcessor::ProcessSession(
     TF_ASSIGN_OR_RETURN(XSpace * xspace,
                         session_snapshot.GetXSpaceByName(*hostname, &arena));
     XprofTrace xprof_trace = XSpaceLoader::Load(*xspace);
-    TraceProcessor processor(&xprof_trace);
+    const bool group_tiny_events =
+        GetParam<bool>(options, "group_tiny_events").value_or(true);
+    TraceProcessor processor(&xprof_trace, group_tiny_events);
     processor.Process();
-    TF_ASSIGN_OR_RETURN(
-        std::string perfetto_trace,
-        PerfettoWriter::WriteToString(xprof_trace, /*compressed_output=*/true));
-    SetOutput(perfetto_trace, "application/octet-stream");
-    return absl::OkStatus();
+    content_type_ = "application/octet-stream";
+    return PerfettoWriter::WriteToString(xprof_trace, &data_,
+                                         /*compressed_output=*/true);
   }
 
   TF_ASSIGN_OR_RETURN(

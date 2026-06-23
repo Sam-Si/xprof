@@ -287,6 +287,22 @@ class ProfilePluginTest(absltest.TestCase):
     hosts_abc_pod_viewer = self.plugin.host_impl('abc', 'pod_viewer')
     self.assertListEqual(expected_all_hosts_only, hosts_abc_pod_viewer)
 
+  def testParseFilename_Riegeli(self):
+    # Test standard .pb file
+    host, tool = profile_plugin._parse_filename('host0.xplane.pb')
+    self.assertEqual(host, 'host0')
+    self.assertEqual(tool, 'xplane')
+
+    # Test new .riegeli file
+    host, tool = profile_plugin._parse_filename('host1.xplane.riegeli')
+    self.assertEqual(host, 'host1')
+    self.assertEqual(tool, 'xplane')
+
+    # Test file without host
+    host, tool = profile_plugin._parse_filename('xplane.pb')
+    self.assertIsNone(host)
+    self.assertEqual(tool, 'xplane')
+
   def testData(self):
     generate_testdata(self.logdir)
     subdir_a = os.path.join(self.logdir, 'a')
@@ -484,8 +500,10 @@ class ProfilePluginTest(absltest.TestCase):
         'trace_viewer_options': {
             'resolution': '10000',
             'full_dma': True,
+            'enable_legacy_dcn': False,
             'start_time_ms': '100',
             'end_time_ms': '200',
+            'search_metadata': False,
         },
         'hosts': ['host1'],
     }
@@ -500,6 +518,7 @@ class ProfilePluginTest(absltest.TestCase):
                 resolution='10000',
                 start_time_ms='100',
                 end_time_ms='200',
+                search_metadata='false',
             )
         )
     )

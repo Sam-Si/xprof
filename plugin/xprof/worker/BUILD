@@ -1,6 +1,17 @@
 # load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
 # load("//third_party/bazel_rules/rules_cc/cc:cc_test.bzl", "cc_test")
 
+exports_files([
+    "grpc_server.cc",
+    "grpc_server.h",
+    "grpc_utils.cc",
+    "grpc_utils.h",
+    "stub_factory.cc",
+    "stub_factory.h",
+    "worker_service.cc",
+    "worker_service.h",
+])
+
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],  # Apache 2.0
@@ -17,6 +28,7 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@org_xprof//plugin/xprof/protobuf:worker_service_cc_grpc_proto",
         "@org_xprof//xprof/convert:profile_processor_factory",
         "@org_xprof//xprof/convert:tool_options",
@@ -36,6 +48,7 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
     ],
+    alwayslink = 1,
 )
 
 cc_library(
@@ -62,6 +75,7 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@org_xprof//plugin/xprof/protobuf:worker_service_cc_grpc_proto",
     ],
+    alwayslink = 1,
 )
 
 cc_test(

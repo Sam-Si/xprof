@@ -24,6 +24,11 @@ xprof_proto_library(
 )
 
 xprof_proto_library(
+    name = "flat_op_metrics_proto",
+    srcs = ["flat_op_metrics.proto"],
+)
+
+xprof_proto_library(
     name = "hardware_types_proto",
     srcs = ["hardware_types.proto"],
 )
@@ -103,6 +108,7 @@ xprof_proto_library(
         ":topology_proto",
         ":diagnostics_proto",
         ":kernel_stats_proto",
+        ":flat_op_metrics_proto",
     ],
 )
 
@@ -202,6 +208,11 @@ xprof_proto_library(
 )
 
 xprof_proto_library(
+    name = "trace_data_response_proto",
+    srcs = ["trace_data_response.proto"],
+)
+
+xprof_proto_library(
     name = "trace_events_proto",
     srcs = ["trace_events.proto"],
     protodeps = [":task_proto"],
@@ -242,6 +253,7 @@ xprof_proto_library(
         ":dcn_slack_analysis_proto",
         ":diagnostics_proto",
         ":event_time_fraction_analyzer_proto",
+        ":flat_op_metrics_proto",
         ":hardware_types_proto",
         ":hlo_stats_proto",
         ":inference_stats_proto",
@@ -268,6 +280,7 @@ xprof_proto_library(
         ":topology_proto",
         ":tpu_input_pipeline_proto",
         ":trace_events_proto",
+        ":trace_data_response_proto",
         ":trace_events_old_proto",
         ":trace_events_raw_proto",
         ":smart_suggestion_proto",
@@ -281,6 +294,7 @@ exports_files(
         "dcn_slack_analysis.proto",
         "diagnostics.proto",
         "event_time_fraction_analyzer.proto",
+        "flat_op_metrics.proto",
         "hardware_types.proto",
         "hlo_stats.proto",
         "inference_stats.proto",
@@ -307,6 +321,7 @@ exports_files(
         "tfstreamz.proto",
         "topology.proto",
         "tpu_input_pipeline.proto",
+        "trace_data_response.proto",
         "trace_events.proto",
         "trace_events_old.proto",
         "trace_events_raw.proto",

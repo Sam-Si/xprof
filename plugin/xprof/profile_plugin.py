@@ -108,6 +108,7 @@ ALL_HOSTS = 'ALL_HOSTS'
 HostMetadata = TypedDict('HostMetadata', {'hostname': str})
 
 _EXTENSION_TO_TOOL = {extension: tool for tool, extension in TOOLS.items()}
+_EXTENSION_TO_TOOL['xplane.riegeli'] = 'xplane'
 
 _FILENAME_RE = re.compile(
     r"""
@@ -117,7 +118,7 @@ _FILENAME_RE = re.compile(
     )?             # End optional non-capturing group.
     (              # Start capture group 2: The tool extension.
     """
-    + '|'.join(re.escape(v) for v in TOOLS.values())
+    + '|'.join(re.escape(v) for v in _EXTENSION_TO_TOOL.keys())
     + r"""
     )              # End capture group 2.
     """,
@@ -739,6 +740,9 @@ class ProfilePlugin(base_plugin.TBPlugin):
     self.hide_capture_profile_button = getattr(
         context, 'hide_capture_profile_button', False
     )
+    self.enable_tab_name_label = getattr(
+        context, 'enable_tab_name_label', False
+    )
     self.src_prefix = getattr(context, 'src_prefix', '')
     self._epath = epath_module
     self._xspace_to_tool_data = xspace_to_tool_data_fn
@@ -839,6 +843,7 @@ class ProfilePlugin(base_plugin.TBPlugin):
     config_data = {
         'hideCaptureProfileButton': self.hide_capture_profile_button,
         'srcPathPrefix': self.src_prefix,
+        'enableTabNameLabel': self.enable_tab_name_label,
     }
     logger.info('config_route: %s', config_data)
     return respond(config_data, 'application/json')
@@ -1214,6 +1219,7 @@ class ProfilePlugin(base_plugin.TBPlugin):
     perfetto = _get_bool_arg(request.args, 'perfetto', False)
     use_saved_result = _get_bool_arg(request.args, 'use_saved_result', True)
     full_dma = _get_bool_arg(request.args, 'full_dma', False)
+    enable_legacy_dcn = _get_bool_arg(request.args, 'enable_legacy_dcn', False)
     run_dir = self._run_dir(run, request)
 
     # Check if the cache file exists and if the cache file version is less
@@ -1245,6 +1251,8 @@ class ProfilePlugin(base_plugin.TBPlugin):
     }
     if request.args.get('group_by'):
       params['group_by'] = request.args.get('group_by')
+    if request.args.get('refresh_suggestion'):
+      params['refresh_suggestion'] = request.args.get('refresh_suggestion')
     content_type = 'application/json'
 
     if tool not in TOOLS and not use_xplane(tool):
@@ -1260,6 +1268,7 @@ class ProfilePlugin(base_plugin.TBPlugin):
       options = {}
       options['resolution'] = request.args.get('resolution', 8000)
       options['full_dma'] = full_dma
+      options['enable_legacy_dcn'] = enable_legacy_dcn
       if request.args.get('start_time_ms') is not None:
         options['start_time_ms'] = request.args.get('start_time_ms')
       if request.args.get('end_time_ms') is not None:
@@ -1272,6 +1281,11 @@ class ProfilePlugin(base_plugin.TBPlugin):
         options['unique_id'] = request.args.get('unique_id')
       if request.args.get('search_prefix') is not None:
         options['search_prefix'] = request.args.get('search_prefix')
+      if request.args.get('search_metadata') is not None:
+        # Retrigger presubmits (second attempt).
+        options['search_metadata'] = _get_bool_arg(
+            request.args, 'search_metadata', False
+        )
       params['trace_viewer_options'] = options
 
     _, content_encoding = None, None

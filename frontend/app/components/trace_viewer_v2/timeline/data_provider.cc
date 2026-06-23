@@ -1,43 +1,81 @@
-#include "xprof/frontend/app/components/trace_viewer_v2/timeline/data_provider.h"
+#include "frontend/app/components/trace_viewer_v2/timeline/data_provider.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/no_destructor.h"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
+#include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "third_party/dear_imgui/imgui.h"
+#include "imgui.h"
 #include "re2/re2.h"
 #include "tsl/profiler/lib/context_types.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/color/colors.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/helper/time_formatter.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/timeline/time_range.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/timeline/timeline.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/trace_helper/trace_event.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/trace_helper/trace_event_tree.h"
-#include "util/gtl/comparator.h"
+#include "frontend/app/components/trace_viewer_v2/color/colors.h"
+#include "frontend/app/components/trace_viewer_v2/helper/time_formatter.h"
+#include "frontend/app/components/trace_viewer_v2/timeline/constants.h"
+#include "frontend/app/components/trace_viewer_v2/timeline/time_range.h"
+#include "frontend/app/components/trace_viewer_v2/timeline/timeline.h"
+#include "frontend/app/components/trace_viewer_v2/trace_helper/trace_event.h"
+#include "frontend/app/components/trace_viewer_v2/trace_helper/trace_event_tree.h"
 
 namespace traceviewer {
 
 namespace {
 
-// The nesting level of a process group in the flame chart.
-constexpr int kProcessNestingLevel = 0;
-// The nesting level of a thread group in the flame chart.
-constexpr int kThreadNestingLevel = 1;
+struct GroupKey {
+  int nesting_level;
+  absl::string_view name;
+  absl::string_view parent_name;
+
+  bool operator<(const GroupKey& other) const {
+    return std::tie(nesting_level, name, parent_name) <
+           std::tie(other.nesting_level, other.name, other.parent_name);
+  }
+};
+
+bool GetExpandedState(int nesting_level, absl::string_view name,
+                      absl::string_view parent_name, bool default_expanded,
+                      const absl::btree_map<GroupKey, bool>& expanded_states) {
+  if (auto it_state = expanded_states.find({nesting_level, name, parent_name});
+      it_state != expanded_states.end()) {
+    return it_state->second;
+  }
+  return default_expanded;
+}
+
+absl::btree_map<GroupKey, bool> GetRestoredExpandedStates(
+    const std::vector<Group>& groups) {
+  absl::btree_map<GroupKey, bool> expanded_states;
+  absl::string_view current_process_name;
+  for (const auto& group : groups) {
+    if (group.nesting_level == kProcessNestingLevel) {
+      current_process_name = group.name;
+      expanded_states[{kProcessNestingLevel, group.name, ""}] = group.expanded;
+    } else {
+      expanded_states[{group.nesting_level, group.name, current_process_name}] =
+          group.expanded;
+    }
+  }
+  return expanded_states;
+}
 
 struct TraceInformation {
   // The TraceEvent objects pointed to must outlive this TraceInformation
@@ -53,14 +91,56 @@ struct TraceInformation {
   absl::flat_hash_map<ProcessId, uint32_t> process_sort_indices;
   absl::btree_map<std::string, std::vector<const TraceEvent*>>
       flow_events_by_id;
+  absl::flat_hash_map<ProcessId, ThreadId> xla_modules_tids;
+  absl::flat_hash_set<ProcessId> async_processes_by_events;
 };
 
+int GetAsyncProcessPriority(ProcessId pid, const TraceInformation& trace_info) {
+  absl::string_view name;
+  if (auto it = trace_info.process_names.find(pid);
+      it != trace_info.process_names.end()) {
+    name = it->second;
+    if (absl::EqualsIgnoreCase(name, kAsyncXlaOps)) return 2;
+  }
+
+  bool is_priority_1 = false;
+
+  if (!name.empty()) {
+    if (absl::StrContainsIgnoreCase(name, kDma) ||
+        absl::EqualsIgnoreCase(name, kDataMotionLayersUtilization)) {
+      is_priority_1 = true;
+    }
+  }
+
+  if (auto it_events = trace_info.events_by_pid_tid.find(pid);
+      it_events != trace_info.events_by_pid_tid.end()) {
+    for (const auto& [tid, _] : it_events->second) {
+      if (auto it_thread = trace_info.thread_names.find({pid, tid});
+          it_thread != trace_info.thread_names.end()) {
+        absl::string_view thread_name = it_thread->second;
+        if (absl::EqualsIgnoreCase(thread_name, kAsyncXlaOps)) {
+          return 2;
+        }
+        if (absl::StrContainsIgnoreCase(thread_name, kDma)) {
+          is_priority_1 = true;
+        }
+      }
+    }
+  }
+
+  if (is_priority_1 || trace_info.async_processes_by_events.contains(pid)) {
+    return 1;
+  }
+
+  return 0;
+}
+
 std::string GetDefaultThreadName(ThreadId tid) {
-  return absl::StrCat("Thread ", tid);
+  return absl::StrCat("Thread_", tid);
 }
 
 std::string GetDefaultProcessName(ProcessId pid) {
-  return absl::StrCat("Process ", pid);
+  return absl::StrCat("Process_", pid);
 }
 
 // Extracts the name from event.args. If not found or empty, returns the
@@ -90,8 +170,12 @@ std::string GetNameWithDefault(const TraceEvent& event,
 void HandleMetadataEvent(const TraceEvent& event,
                          TraceInformation& trace_info) {
   if (event.name == kThreadName) {
-    trace_info.thread_names[{event.pid, event.tid}] =
+    const std::string name =
         GetNameWithDefault(event, GetDefaultThreadName(event.tid));
+    trace_info.thread_names[{event.pid, event.tid}] = name;
+    if (name == kXlaModules) {
+      trace_info.xla_modules_tids[event.pid] = event.tid;
+    }
   } else if (event.name == kProcessName) {
     trace_info.process_names[event.pid] =
         GetNameWithDefault(event, GetDefaultProcessName(event.pid));
@@ -126,6 +210,9 @@ void HandleMetadataEvent(const TraceEvent& event,
 void HandleCompleteEvent(const TraceEvent& event,
                          TraceInformation& trace_info) {
   trace_info.events_by_pid_tid[event.pid][event.tid].push_back(&event);
+  if (event.is_async) {
+    trace_info.async_processes_by_events.insert(event.pid);
+  }
 }
 
 void HandleFlowEvent(const TraceEvent& event, TraceInformation& trace_info,
@@ -185,9 +272,12 @@ std::vector<int> GetTop5FlowCategories(
       sorted_flow_categories.push_back({cat, count});
     }
   }
-  absl::c_stable_sort(
-      sorted_flow_categories,
-      gtl::ChainComparators(gtl::OrderBySecondGreater(), gtl::OrderByFirst()));
+  absl::c_stable_sort(sorted_flow_categories, [](const auto& a, const auto& b) {
+    if (a.second != b.second) {
+      return a.second > b.second;
+    }
+    return a.first < b.first;
+  });
   std::vector<int> top_5_flow_categories;
   for (int i = 0; i < std::min<size_t>(sorted_flow_categories.size(), 5); ++i) {
     top_5_flow_categories.push_back(sorted_flow_categories[i].first);
@@ -196,19 +286,20 @@ std::vector<int> GetTop5FlowCategories(
 }
 
 ImU32 GetFlowColorForCategory(tsl::profiler::ContextType category,
-                              const std::vector<int>& top_5_flow_categories) {
+                              absl::Span<const int> top_5_flow_categories,
+                              const ColorPalette& palette) {
   if (category == tsl::profiler::ContextType::kGeneric) {
     return kRed80;
   }
 
-  constexpr ImU32 top_5_colors[] = {kOrange80, kYellow80, kGreen80, kBlue80,
-                                    kCyan80};
-  const size_t loop_limit =
-      std::min(top_5_flow_categories.size(), std::size(top_5_colors));
+  absl::Span<const ImU32> flow_colors = palette.GetFlowColors();
+  if (flow_colors.empty()) {
+    return kPurple80;  // Fallback if no flow colors are provided.
+  }
 
-  for (size_t i = 0; i < loop_limit; ++i) {
+  for (size_t i = 0; i < top_5_flow_categories.size(); ++i) {
     if (static_cast<int>(category) == top_5_flow_categories[i]) {
-      return top_5_colors[i];
+      return flow_colors[i % flow_colors.size()];
     }
   }
   return kPurple80;
@@ -250,8 +341,9 @@ int GetEventFlameChartLevel(
 void GenerateFlowLines(const TraceInformation& trace_info,
                        const absl::btree_map<std::pair<ProcessId, ThreadId>,
                                              ThreadLevelInfo>& thread_levels,
-                       const std::vector<int>& top_5_flow_categories,
-                       FlameChartTimelineData& data, TimeBounds& bounds) {
+                       absl::Span<const int> top_5_flow_categories,
+                       FlameChartTimelineData& data, TimeBounds& bounds,
+                       const ColorPalette& palette) {
   for (const auto& [id, flow_events] : trace_info.flow_events_by_id) {
     for (const TraceEvent* event : flow_events) {
       std::vector<std::string>& event_flow_ids =
@@ -264,8 +356,9 @@ void GenerateFlowLines(const TraceInformation& trace_info,
     for (size_t i = 0; i < flow_events.size() - 1; ++i) {
       const TraceEvent* u = flow_events[i];
       const TraceEvent* v = flow_events[i + 1];
-      const ImU32 flow_color = GetFlowColorForCategory(
-          u->category, top_5_flow_categories);  // Use flow category for color
+      const ImU32 flow_color =
+          GetFlowColorForCategory(u->category, top_5_flow_categories,
+                                  palette);  // Use flow category for color
       FlowLine flow_line{
           .source_ts = u->ts,
           .target_ts = v->ts,
@@ -283,154 +376,250 @@ void GenerateFlowLines(const TraceInformation& trace_info,
   }
 }
 
+void AppendEventToTimelineData(const TraceEvent* event, int level,
+                               FlameChartTimelineData& data, TimeBounds& bounds,
+                               const TraceInformation& trace_info,
+                               absl::string_view thread_name) {
+  static const absl::NoDestructor<std::string> kHloOpStr(kHloOp);
+  static const absl::NoDestructor<std::string> kHloModuleStr(kHloModule);
+  static const absl::NoDestructor<std::string> kHloModuleDefaultStr(
+      kHloModuleDefault);
+  static const absl::NoDestructor<std::string> kHloModuleIdStr(kHloModuleId);
+  static const absl::NoDestructor<std::string> kProgramIdStr(kProgramId);
+  static const absl::NoDestructor<std::string> kKernelDetailsStr(
+      kKernelDetails);
+  static const absl::NoDestructor<RE2> kModuleRe(kModuleRegex);
+
+  data.entry_start_times.push_back(event->ts);
+  data.entry_total_times.push_back(event->dur);
+  data.entry_levels.push_back(level);
+  data.entry_names.push_back(event->name);
+  data.entry_event_ids.push_back(event->event_id);
+  data.entry_pids.push_back(event->pid);
+  data.entry_tids.push_back(event->tid);
+
+  auto cur_args = event->args;
+  bool is_xla_ops_thread = thread_name == kXlaOps;
+  bool is_data_motion_layer = thread_name == kComputeUtilization ||
+                              thread_name == kDataMotionLayersUtilization;
+  bool has_hlo_in_args = event->args.count(*kHloOpStr) > 0 &&
+                         event->args.count(*kHloModuleStr) > 0;
+  if (is_xla_ops_thread || is_data_motion_layer || has_hlo_in_args) {
+    if (is_data_motion_layer) {
+      auto it_name = event->args.find("Name");
+      if (it_name != event->args.end()) {
+        cur_args[*kHloOpStr] = it_name->second;
+      }
+    } else if (!event->args.count(*kHloOpStr)) {
+      cur_args[*kHloOpStr] = event->name;
+    }
+    std::string hlo_module_str = *kHloModuleDefaultStr;
+    auto it_hlo_module = event->args.find(*kHloModuleStr);
+    if (it_hlo_module != event->args.end()) {
+      const std::string& hlo_module_name = it_hlo_module->second;
+      auto it_hlo_module_id = event->args.find(*kHloModuleIdStr);
+      auto it_program_id = event->args.find(*kProgramIdStr);
+      if (it_hlo_module_id != event->args.end()) {
+        hlo_module_str =
+            absl::StrCat(hlo_module_name, "(", it_hlo_module_id->second, ")");
+      } else if (it_program_id != event->args.end()) {
+        hlo_module_str =
+            absl::StrCat(hlo_module_name, "(", it_program_id->second, ")");
+      } else {
+        auto it_kernel_details = event->args.find(*kKernelDetailsStr);
+        if (it_kernel_details != event->args.end()) {
+          std::string module_id;
+          if (RE2::PartialMatch(it_kernel_details->second, *kModuleRe,
+                                &module_id)) {
+            hlo_module_str = absl::StrCat(hlo_module_name, "(", module_id, ")");
+          } else {
+            hlo_module_str = hlo_module_name;
+          }
+        } else {
+          hlo_module_str = hlo_module_name;
+        }
+      }
+    } else {
+      // Direct lookup for "XLA Modules" thread per process.
+      auto it_tid = trace_info.xla_modules_tids.find(event->pid);
+      if (it_tid != trace_info.xla_modules_tids.end()) {
+        ThreadId tid = it_tid->second;
+        auto it_events = trace_info.events_by_pid_tid.find(event->pid);
+        if (it_events != trace_info.events_by_pid_tid.end()) {
+          auto it_thread_events = it_events->second.find(tid);
+          if (it_thread_events != it_events->second.end()) {
+            for (const TraceEvent* module_event : it_thread_events->second) {
+              if (module_event->ts <= event->ts &&
+                  module_event->ts + module_event->dur >= event->ts) {
+                hlo_module_str = module_event->name;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    cur_args[*kHloModuleStr] = hlo_module_str;
+  } else {
+    cur_args[*kHloModuleStr] = *kHloModuleDefaultStr;
+  }
+  data.entry_args.push_back(cur_args);
+
+  bounds.min = std::min(bounds.min, event->ts);
+  bounds.max = std::max(bounds.max, event->ts + event->dur);
+}
+
 // Appends the given nodes (an array of trees) to the data, starting at the
 // given level. Returns the maximum level of the nodes.
 int AppendNodesAtLevel(absl::Span<const std::unique_ptr<TraceEventNode>> nodes,
                        int current_level, FlameChartTimelineData& data,
                        TimeBounds& bounds, const TraceInformation& trace_info,
                        absl::string_view thread_name) {
-  int max_level = current_level;
+  struct StackFrame {
+    absl::Span<const std::unique_ptr<TraceEventNode>> nodes;
+    int level;
+  };
 
-  for (const std::unique_ptr<TraceEventNode>& node : nodes) {
-    const TraceEvent* event = node->event;
-
-    data.entry_start_times.push_back(event->ts);
-    data.entry_total_times.push_back(event->dur);
-    data.entry_levels.push_back(current_level);
-    data.entry_names.push_back(event->name);
-    data.entry_event_ids.push_back(event->event_id);
-    data.entry_pids.push_back(event->pid);
-    data.entry_tids.push_back(event->tid);
-
-    auto cur_args = event->args;
-    bool is_xla_ops_thread = thread_name == kXlaOps;
-    bool is_data_motion_layer =
-        thread_name == kComputeUtilization ||
-        thread_name == kDataMotionLayersUtilization;
-    bool has_hlo_in_args =
-        event->args.count(std::string(kHloOp)) > 0 &&
-        event->args.count(std::string(kHloModule)) > 0;
-    if (is_xla_ops_thread || is_data_motion_layer || has_hlo_in_args) {
-      if (is_data_motion_layer) {
-        auto it_name = event->args.find("Name");
-        if (it_name != event->args.end()) {
-          cur_args[std::string(kHloOp)] = it_name->second;
-        }
-      } else if (!event->args.count(std::string(kHloOp))) {
-        cur_args[std::string(kHloOp)] = event->name;
-      }
-      std::string hlo_module_str = std::string(kHloModuleDefault);
-      auto it_hlo_module = event->args.find(std::string(kHloModule));
-      if (it_hlo_module != event->args.end()) {
-        const std::string& hlo_module_name = it_hlo_module->second;
-        auto it_hlo_module_id = event->args.find(std::string(kHloModuleId));
-        auto it_program_id = event->args.find(std::string(kProgramId));
-        if (it_hlo_module_id != event->args.end()) {
-          hlo_module_str =
-              absl::StrCat(hlo_module_name, "(", it_hlo_module_id->second, ")");
-        } else if (it_program_id != event->args.end()) {
-          hlo_module_str =
-              absl::StrCat(hlo_module_name, "(", it_program_id->second, ")");
-        } else {
-          auto it_kernel_details =
-              event->args.find(std::string(kKernelDetails));
-          if (it_kernel_details != event->args.end()) {
-            std::string module_id;
-            if (RE2::PartialMatch(it_kernel_details->second, kModuleRegex,
-                                  &module_id)) {
-              hlo_module_str =
-                  absl::StrCat(hlo_module_name, "(", module_id, ")");
-            } else {
-              hlo_module_str = hlo_module_name;
-            }
-          } else {
-            hlo_module_str = hlo_module_name;
-          }
-        }
-      } else {
-        // search in "XLA Modules"
-        bool hlo_module_found = false;
-        for (auto const& [pid_tid, name] : trace_info.thread_names) {
-          if (pid_tid.first == event->pid && name == kXlaModules) {
-            auto it_events = trace_info.events_by_pid_tid.find(event->pid);
-            if (it_events != trace_info.events_by_pid_tid.end()) {
-              auto it_thread_events = it_events->second.find(pid_tid.second);
-              if (it_thread_events != it_events->second.end()) {
-                for (const TraceEvent* module_event :
-                     it_thread_events->second) {
-                  if (module_event->ts <= event->ts &&
-                      module_event->ts + module_event->dur >= event->ts) {
-                    hlo_module_str = module_event->name;
-                    hlo_module_found = true;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-          if (hlo_module_found) break;
-        }
-      }
-      cur_args[std::string(kHloModule)] = hlo_module_str;
-    } else {
-      cur_args[std::string(kHloModule)] = std::string(kHloModuleDefault);
-    }
-    data.entry_args.push_back(cur_args);
-
-    bounds.min = std::min(bounds.min, event->ts);
-    bounds.max = std::max(bounds.max, event->ts + event->dur);
-
-    if (!node->children.empty()) {
-      int child_max_level =
-          AppendNodesAtLevel(node->children, current_level + 1, data, bounds,
-                             trace_info, thread_name);
-      max_level = std::max(max_level, child_max_level);
-    }
+  int max_level_overall = current_level;
+  std::vector<StackFrame> stack;
+  if (!nodes.empty()) {
+    stack.push_back({nodes, current_level});
   }
 
-  return max_level;
+  while (!stack.empty()) {
+    StackFrame frame = stack.back();
+    stack.pop_back();
+
+    int level = frame.level;
+    max_level_overall = std::max(max_level_overall, level);
+
+    for (const auto& node : frame.nodes) {
+      const TraceEvent* event = node->event;
+
+      AppendEventToTimelineData(event, level, data, bounds, trace_info,
+                                thread_name);
+
+      if (!node->children.empty()) {
+        stack.push_back({node->children, level + 1});
+      }
+    }
+  }
+  return max_level_overall;
 }
 
-void PopulateThreadTrack(ProcessId pid, ThreadId tid,
-                         absl::Span<const TraceEvent* const> events,
-                         const TraceInformation& trace_info, int& current_level,
-                         FlameChartTimelineData& data, TimeBounds& bounds,
-                         absl::btree_map<std::pair<ProcessId, ThreadId>,
-                                         ThreadLevelInfo>& thread_levels,
-                         bool expand_group) {
-  const auto it = trace_info.thread_names.find({pid, tid});
-  const std::string thread_group_name = it == trace_info.thread_names.end()
-                                            ? GetDefaultThreadName(tid)
-                                            : it->second;
+void PopulateThreadTrackWithPackedLayout(
+    ProcessId pid, ThreadId tid, absl::Span<const TraceEvent* const> events,
+    int start_level, int& max_level, FlameChartTimelineData& data,
+    TimeBounds& bounds, const TraceInformation& trace_info,
+    const std::string& thread_group_name) {
+  std::vector<const TraceEvent*> sorted_events(events.begin(), events.end());
+  absl::c_sort(sorted_events, [](const TraceEvent* a, const TraceEvent* b) {
+    return a->ts < b->ts;
+  });
+
+  std::vector<Microseconds> row_end_times;
+  for (const TraceEvent* event : sorted_events) {
+    const Microseconds start = event->ts;
+    const Microseconds duration = event->dur;
+    const Microseconds end = start + duration;
+
+    int selected_row = -1;
+    for (size_t i = 0; i < row_end_times.size(); ++i) {
+      if (row_end_times[i] <= start) {
+        selected_row = i;
+        break;
+      }
+    }
+
+    if (selected_row == -1) {
+      row_end_times.push_back(end);
+      selected_row = row_end_times.size() - 1;
+    } else {
+      row_end_times[selected_row] = end;
+    }
+
+    int absolute_level = start_level + selected_row;
+    max_level = std::max(max_level, absolute_level);
+
+    AppendEventToTimelineData(event, absolute_level, data, bounds, trace_info,
+                              thread_group_name);
+  }
+}
+
+void PopulateThreadTrackWithTreeLayout(
+    ProcessId pid, ThreadId tid, absl::Span<const TraceEvent* const> events,
+    int current_level, int& max_level, FlameChartTimelineData& data,
+    TimeBounds& bounds, const TraceInformation& trace_info,
+    const std::string& thread_group_name) {
+  TraceEventTree event_tree = BuildTree(events);
+  max_level = AppendNodesAtLevel(event_tree.roots, current_level, data, bounds,
+                                 trace_info, thread_group_name);
+}
+
+void PopulateThreadTrack(
+    ProcessId pid, ThreadId tid, absl::Span<const TraceEvent* const> events,
+    const TraceInformation& trace_info, int& current_level,
+    FlameChartTimelineData& data, TimeBounds& bounds,
+    absl::btree_map<std::pair<ProcessId, ThreadId>, ThreadLevelInfo>&
+        thread_levels,
+    const std::string& process_group_name, bool default_expanded,
+    const absl::btree_map<GroupKey, bool>& expanded_states,
+    std::optional<absl::string_view> custom_name = std::nullopt) {
+  std::string thread_group_name;
+  if (custom_name.has_value()) {
+    thread_group_name = std::string(*custom_name);
+  } else {
+    const auto it = trace_info.thread_names.find({pid, tid});
+    thread_group_name = it == trace_info.thread_names.end()
+                            ? GetDefaultThreadName(tid)
+                            : it->second;
+  }
+
+  bool expanded =
+      GetExpandedState(kThreadNestingLevel, thread_group_name,
+                       process_group_name, default_expanded, expanded_states);
 
   data.groups.push_back({.name = thread_group_name,
                          .start_level = current_level,
                          .nesting_level = kThreadNestingLevel,
-                         .expanded = expand_group});
+                         .expanded = expanded});
 
   int start_level = current_level;
+  int max_level = start_level;
 
-  TraceEventTree event_tree = BuildTree(events);
-
-  // Get the maximum level index used by events in this thread.
-  int max_level = AppendNodesAtLevel(event_tree.roots, current_level, data,
-                                     bounds, trace_info, thread_group_name);
+  if (custom_name.has_value()) {
+    PopulateThreadTrackWithPackedLayout(pid, tid, events, start_level,
+                                        max_level, data, bounds, trace_info,
+                                        thread_group_name);
+  } else {
+    PopulateThreadTrackWithTreeLayout(pid, tid, events, current_level,
+                                      max_level, data, bounds, trace_info,
+                                      thread_group_name);
+  }
 
   current_level = max_level + 1;
   thread_levels[{pid, tid}] = {start_level, current_level};
+
+  if (max_level == start_level) {
+    data.groups.back().expanded = true;
+  }
 }
 
-void PopulateCounterTrack(ProcessId pid, const std::string& name,
-                          absl::Span<const CounterEvent* const> events,
-                          const TraceInformation& trace_info,
-                          int& current_level, FlameChartTimelineData& data,
-                          TimeBounds& bounds, bool expand_group) {
+void PopulateCounterTrack(
+    ProcessId pid, const std::string& name,
+    absl::Span<const CounterEvent* const> events,
+    const TraceInformation& trace_info, int& current_level,
+    FlameChartTimelineData& data, TimeBounds& bounds,
+    const std::string& process_group_name, bool default_expanded,
+    const absl::btree_map<GroupKey, bool>& expanded_states) {
   Group group;
   group.type = Group::Type::kCounter;
   group.name = name;
-  group.nesting_level = kThreadNestingLevel;
+  group.nesting_level = kCounterNestingLevel;
   group.start_level = current_level;
-  group.expanded = expand_group;
+
+  // Counters always take one level, so force them to be expanded.
+  group.expanded = true;
 
   size_t total_entries = 0;
   // The number of counter events per counter track won't be too large, so
@@ -475,12 +664,99 @@ void PopulateCounterTrack(ProcessId pid, const std::string& name,
   current_level++;
 }
 
-void PopulateProcessTrack(ProcessId pid, const TraceInformation& trace_info,
-                          int& current_level, FlameChartTimelineData& data,
-                          TimeBounds& bounds,
-                          absl::btree_map<std::pair<ProcessId, ThreadId>,
-                                          ThreadLevelInfo>& thread_levels,
-                          bool expand_group) {
+void PopulateAsyncProcessTrack(
+    ProcessId pid, const std::string& process_group_name,
+    TraceInformation& trace_info, int& current_level,
+    FlameChartTimelineData& data, TimeBounds& bounds,
+    absl::btree_map<std::pair<ProcessId, ThreadId>, ThreadLevelInfo>&
+        thread_levels,
+    bool default_expanded,
+    const absl::btree_map<GroupKey, bool>& expanded_states) {
+  absl::btree_map<std::string, std::vector<const TraceEvent*>> async_groups;
+  absl::btree_map<ThreadId, std::vector<const TraceEvent*>> sync_groups;
+
+  const auto it_events = trace_info.events_by_pid_tid.find(pid);
+  if (it_events == trace_info.events_by_pid_tid.end()) return;
+
+  for (const auto& [tid, tid_events] : it_events->second) {
+    for (const TraceEvent* event : tid_events) {
+      if (event->is_async) {
+        async_groups[event->name].push_back(event);
+      } else {
+        sync_groups[tid].push_back(event);
+      }
+    }
+  }
+
+  // Populate named async tracks first.
+  // Starting synthetic TIDs at 0x80000000 is generally safe, but if the trace
+  // contains very large TIDs (e.g., from a system that uses 64-bit TIDs or
+  // just very high values), there is a small risk of collision. Since these are
+  // only used internally for grouping, it's likely fine.
+  ThreadId next_synthetic_tid = 0x80000000;
+  for (const auto& [name, named_events] : async_groups) {
+    PopulateThreadTrack(pid, next_synthetic_tid, named_events, trace_info,
+                        current_level, data, bounds, thread_levels,
+                        process_group_name, default_expanded, expanded_states,
+                        name);
+    next_synthetic_tid++;
+  }
+
+  // Populate standard thread tracks.
+  for (const auto& [tid, events] : sync_groups) {
+    PopulateThreadTrack(pid, tid, events, trace_info, current_level, data,
+                        bounds, thread_levels, process_group_name,
+                        default_expanded, expanded_states);
+  }
+}
+
+void PopulateSyncProcessTrack(
+    ProcessId pid, const std::string& process_group_name,
+    const TraceInformation& trace_info, int& current_level,
+    FlameChartTimelineData& data, TimeBounds& bounds,
+    absl::btree_map<std::pair<ProcessId, ThreadId>, ThreadLevelInfo>&
+        thread_levels,
+    bool default_expanded,
+    const absl::btree_map<GroupKey, bool>& expanded_states) {
+  const auto it_events = trace_info.events_by_pid_tid.find(pid);
+  std::set<ThreadId> tids;
+  if (it_events != trace_info.events_by_pid_tid.end()) {
+    for (const auto& [tid, _] : it_events->second) {
+      tids.insert(tid);
+    }
+  }
+
+  // Collect tids from thread_names
+  for (auto it = trace_info.thread_names.lower_bound({pid, 0});
+       it != trace_info.thread_names.end() && it->first.first == pid; ++it) {
+    tids.insert(it->first.second);
+  }
+
+  for (const auto tid : tids) {
+    absl::Span<const TraceEvent* const> events;
+    if (it_events != trace_info.events_by_pid_tid.end()) {
+      auto it = it_events->second.find(tid);
+      if (it != it_events->second.end()) {
+        events = it->second;
+      }
+    }
+    PopulateThreadTrack(pid, tid, events, trace_info, current_level, data,
+                        bounds, thread_levels, process_group_name,
+                        default_expanded, expanded_states);
+  }
+}
+
+bool IsAsyncProcess(ProcessId pid, const TraceInformation& trace_info) {
+  return GetAsyncProcessPriority(pid, trace_info) > 0;
+}
+
+void PopulateProcessTrack(
+    ProcessId pid, TraceInformation& trace_info, int& current_level,
+    FlameChartTimelineData& data, TimeBounds& bounds,
+    absl::btree_map<std::pair<ProcessId, ThreadId>, ThreadLevelInfo>&
+        thread_levels,
+    bool default_expanded,
+    const absl::btree_map<GroupKey, bool>& expanded_states) {
   const auto it_events = trace_info.events_by_pid_tid.find(pid);
   const bool has_events = it_events != trace_info.events_by_pid_tid.end() &&
                           !it_events->second.empty();
@@ -490,31 +766,54 @@ void PopulateProcessTrack(ProcessId pid, const TraceInformation& trace_info,
       it_counters != trace_info.counters_by_pid_name.end() &&
       !it_counters->second.empty();
 
-  if (!has_events && !has_counters) {
-    // No events or counters for this process, so skip this process group.
+  // Check if any threads exist for this PID in thread_names.
+  auto it_thread_names = trace_info.thread_names.lower_bound({pid, 0});
+  bool has_named_threads = (it_thread_names != trace_info.thread_names.end() &&
+                            it_thread_names->first.first == pid);
+
+  if (!has_events && !has_counters && !has_named_threads) {
+    // No events, counters, or named tracks for this process, so skip this
+    // process group.
     return;
   }
 
-  const auto it = trace_info.process_names.find(pid);
-  const std::string process_group_name = it == trace_info.process_names.end()
-                                             ? GetDefaultProcessName(pid)
-                                             : it->second;
+  const std::string process_group_name = trace_info.process_names.at(pid);
+
+  bool expanded = GetExpandedState(kProcessNestingLevel, process_group_name, "",
+                                   default_expanded, expanded_states);
+
+  std::string track_subtitle;
+
+  const size_t separator_pos = process_group_name.find(' ');
+  if (separator_pos != std::string::npos) {
+    track_subtitle = process_group_name.substr(0, separator_pos);
+  }
+
   data.groups.push_back({.name = process_group_name,
+                         .subtitle = std::move(track_subtitle),
                          .start_level = current_level,
                          .nesting_level = kProcessNestingLevel,
-                         .expanded = expand_group});
+                         .expanded = expanded});
 
-  if (has_events) {
-    for (const auto& [tid, events] : it_events->second) {
-      PopulateThreadTrack(pid, tid, events, trace_info, current_level, data,
-                          bounds, thread_levels, expand_group);
+  if (has_events || has_named_threads) {
+    bool is_async_process = IsAsyncProcess(pid, trace_info);
+
+    if (is_async_process) {
+      PopulateAsyncProcessTrack(pid, process_group_name, trace_info,
+                                current_level, data, bounds, thread_levels,
+                                default_expanded, expanded_states);
+    } else {
+      PopulateSyncProcessTrack(pid, process_group_name, trace_info,
+                               current_level, data, bounds, thread_levels,
+                               default_expanded, expanded_states);
     }
   }
 
   if (has_counters) {
     for (const auto& [name, events] : it_counters->second) {
       PopulateCounterTrack(pid, name, events, trace_info, current_level, data,
-                           bounds, expand_group);
+                           bounds, process_group_name, default_expanded,
+                           expanded_states);
     }
   }
 }
@@ -526,7 +825,16 @@ std::vector<ProcessId> GetSortedProcessIds(const TraceInformation& trace_info) {
     pids.push_back(pid);
   }
 
+  absl::flat_hash_map<ProcessId, int> async_process_priorities;
+  for (const ProcessId pid : pids) {
+    async_process_priorities[pid] = GetAsyncProcessPriority(pid, trace_info);
+  }
+
   absl::c_stable_sort(pids, [&](ProcessId a, ProcessId b) {
+    int priority_a = async_process_priorities[a];
+    int priority_b = async_process_priorities[b];
+    if (priority_a != priority_b) return priority_a > priority_b;
+
     uint32_t index_a = a;
     if (auto it = trace_info.process_sort_indices.find(a);
         it != trace_info.process_sort_indices.end()) {
@@ -544,8 +852,9 @@ std::vector<ProcessId> GetSortedProcessIds(const TraceInformation& trace_info) {
 }
 
 FlameChartTimelineData CreateTimelineData(
-    const TraceInformation& trace_info,
-    const std::vector<int>& top_5_flow_categories, TimeBounds& bounds) {
+    TraceInformation& trace_info, absl::Span<const int> top_5_flow_categories,
+    TimeBounds& bounds, const absl::btree_map<GroupKey, bool>& expanded_states,
+    const ColorPalette& palette) {
   FlameChartTimelineData data;
   int current_level = 0;
   absl::btree_map<std::pair<ProcessId, ThreadId>, ThreadLevelInfo>
@@ -554,7 +863,7 @@ FlameChartTimelineData CreateTimelineData(
   bool first_process = true;
   for (const ProcessId pid : GetSortedProcessIds(trace_info)) {
     PopulateProcessTrack(pid, trace_info, current_level, data, bounds,
-                         thread_levels, first_process);
+                         thread_levels, first_process, expanded_states);
     first_process = false;
   }
 
@@ -563,8 +872,23 @@ FlameChartTimelineData CreateTimelineData(
     data.events_by_level[data.entry_levels[i]].push_back(i);
   }
 
+  for (int i = 0; i < data.events_by_level.size(); ++i) {
+    // Sort by start time ascending, then duration descending.
+    auto cmp_by_start_asc_then_dur_desc = [&](int idx_a, int idx_b) {
+      return data.entry_start_times[idx_a] < data.entry_start_times[idx_b] ||
+             (data.entry_start_times[idx_a] == data.entry_start_times[idx_b] &&
+              data.entry_total_times[idx_a] > data.entry_total_times[idx_b]);
+    };
+
+    LOG_IF(WARNING, !absl::c_is_sorted(data.events_by_level[i],
+                                       cmp_by_start_asc_then_dur_desc))
+        << "Trace Events not sorted properly for level: " << i;
+    absl::c_stable_sort(data.events_by_level[i],
+                        cmp_by_start_asc_then_dur_desc);
+  }
+
   GenerateFlowLines(trace_info, thread_levels, top_5_flow_categories, data,
-                    bounds);
+                    bounds, palette);
   return data;
 }
 
@@ -577,7 +901,7 @@ void DataProvider::ProcessTraceEvents(const ParsedTraceEvents& parsed_events,
   if (parsed_events.flame_events.empty() &&
       parsed_events.counter_events.empty() &&
       parsed_events.flow_events.empty()) {
-    timeline.set_timeline_data({});
+    timeline.SetTimelineData({});
     timeline.set_fetched_data_time_range(TimeRange::Zero());
     timeline.SetVisibleRange(TimeRange::Zero());
     return;
@@ -592,6 +916,8 @@ void DataProvider::ProcessTraceEvents(const ParsedTraceEvents& parsed_events,
         HandleMetadataEvent(event, trace_info);
         break;
       case Phase::kComplete:
+      case Phase::kInstant:
+      case Phase::kInstantDeprecated:
         HandleCompleteEvent(event, trace_info);
         break;
       default:
@@ -618,6 +944,12 @@ void DataProvider::ProcessTraceEvents(const ParsedTraceEvents& parsed_events,
     trace_info.process_names.try_emplace(pid, GetDefaultProcessName(pid));
   }
 
+  // Ensure all pids from thread_names are registered.
+  for (const auto& [key, _] : trace_info.thread_names) {
+    trace_info.process_names.try_emplace(key.first,
+                                         GetDefaultProcessName(key.first));
+  }
+
   // Ensure all pids/tids from flow events are registered so that thread tracks
   // are created for them, which is required for level calculation.
   for (const auto& [id, events] : trace_info.flow_events_by_id) {
@@ -639,34 +971,46 @@ void DataProvider::ProcessTraceEvents(const ParsedTraceEvents& parsed_events,
   // (descending).
   for (auto& [pid, events_by_tid] : trace_info.events_by_pid_tid) {
     for (auto& [tid, events] : events_by_tid) {
-      absl::c_stable_sort(
-          events, gtl::ChainComparators(
-                      gtl::OrderBy([](const TraceEvent* e) { return e->ts; }),
-                      gtl::OrderBy([](const TraceEvent* e) { return e->dur; },
-                                   gtl::Greater())));
+      absl::c_stable_sort(events, [](const TraceEvent* a, const TraceEvent* b) {
+        if (a->ts != b->ts) {
+          return a->ts < b->ts;
+        }
+        return a->dur > b->dur;
+      });
     }
   }
 
   for (auto& [id, events] : trace_info.flow_events_by_id) {
-    absl::c_stable_sort(
-        events, gtl::OrderBy([](const TraceEvent* e) { return e->ts; }));
+    absl::c_stable_sort(events, [](const TraceEvent* a, const TraceEvent* b) {
+      return a->ts < b->ts;
+    });
   }
 
   for (auto& [pid, counters_by_name] : trace_info.counters_by_pid_name) {
     for (auto& [name, events] : counters_by_name) {
       absl::c_stable_sort(
-          events, gtl::OrderBy([](const CounterEvent* e) {
-            return e->timestamps.empty()
-                       ? std::numeric_limits<Microseconds>::max()
-                       : e->timestamps.front();
-          }));
+          events, [](const CounterEvent* a, const CounterEvent* b) {
+            const auto get_ts = [](const CounterEvent* e) {
+              return e->timestamps.empty()
+                         ? std::numeric_limits<Microseconds>::max()
+                         : e->timestamps.front();
+            };
+            return get_ts(a) < get_ts(b);
+          });
     }
   }
 
   TimeBounds time_bounds;
 
-  timeline.set_timeline_data(CreateTimelineData(
-      trace_info, GetTop5FlowCategories(flow_category_counts), time_bounds));
+  const absl::btree_map<GroupKey, bool> expanded_states =
+      GetRestoredExpandedStates(timeline.timeline_data().groups);
+
+  timeline.SetTimelineData(CreateTimelineData(
+      trace_info, GetTop5FlowCategories(flow_category_counts), time_bounds,
+      expanded_states, timeline.GetPalette()));
+
+  process_names_.insert(trace_info.process_names.begin(),
+                        trace_info.process_names.end());
 
   // Don't need to check for max_time because the TimeRange constructor will
   // handle any potential issues with max_time.
@@ -681,7 +1025,9 @@ void DataProvider::ProcessTraceEvents(const ParsedTraceEvents& parsed_events,
       Microseconds end =
           MillisToMicros(parsed_events.visible_range_from_url->second);
 
-      timeline.SetVisibleRange({start, end});
+      if (timeline.visible_range() == TimeRange::Zero()) {
+        timeline.SetVisibleRange({start, end});
+      }
     } else {
       // If the visible range is not zero, we just keep it. This happens when
       // the incremental loading is triggered and we don't want to override the
@@ -706,6 +1052,18 @@ void DataProvider::ProcessTraceEvents(const ParsedTraceEvents& parsed_events,
 
 const std::vector<int>& DataProvider::GetFlowCategories() const {
   return present_flow_categories_;
+}
+
+absl::flat_hash_map<ProcessId, std::string> DataProvider::GetProcessMappings()
+    const {
+  absl::flat_hash_map<ProcessId, std::string> map;
+  for (const auto& [pid, process_name] : process_names_) {
+    std::string host_part = process_name.substr(0, process_name.find(' '));
+    if (!host_part.empty()) {
+      map[pid] = host_part;
+    }
+  }
+  return map;
 }
 
 }  // namespace traceviewer

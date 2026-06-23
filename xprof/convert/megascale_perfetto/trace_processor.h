@@ -13,7 +13,8 @@ namespace xprof::megascale {
 // actions and their dependencies.
 class TraceProcessor {
  public:
-  explicit TraceProcessor(XprofTrace* absl_nonnull trace) : trace_(*trace) {}
+  explicit TraceProcessor(XprofTrace* absl_nonnull trace,
+                          bool group_tiny_events = true);
 
   // This function makes a series of modifications to the trace in-place:
   // - Reorders events in a more logical order.
@@ -35,15 +36,26 @@ class TraceProcessor {
   // Resolves flows between TPU events and Megascale events.
   void ResolveFlows();
   // Adds a counter track for network metrics.
-  void AddNetworkCounters();
+  void AddGlobalCounters();
+  // Tiny event grouping (folding) is a layout optimization for the Perfetto
+  // trace UI. Subsequent tiny TPU events (duration strictly < 1ns)
+  // floor-truncate to the same nanosecond integer coordinate, appearing as
+  // length 0 instant slices. Perfetto stacks these vertical columns, wasting
+  // canvas space. Grouping aggregates these contiguous compute events into a
+  // single composite Summary Block, compressing layout height while keeping
+  // the core timeline flat.
+  void MaybeGroupTinyEvents();
   // Modifies track names to make them more readable and to control ordering in
   // Perfetto UI.
   void ModifyTrackNames();
 
   XprofTrace& trace_;
+  const bool group_tiny_events_;
 
-  // Helper for generating unique flow IDs during processing
-  int64_t next_flow_id_ = 1;
+  // Cached interned string keys to bypass hashing loops
+  const StringId description_key_;
+  const StringId description_val_;
+  const StringId hidden_events_key_;
 };
 
 }  // namespace xprof::megascale

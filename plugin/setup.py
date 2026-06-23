@@ -21,10 +21,26 @@ import setuptools
 
 from xprof import version
 
+try:
+  from wheel.bdist_wheel import bdist_wheel as _bdist_wheel  # pylint: disable=g-import-not-at-top # pytype: disable=import-error
+
+  class CustomBdistWheel(_bdist_wheel):
+
+    def finalize_options(self):
+      _bdist_wheel.finalize_options(self)
+      self.root_is_pure = False
+
+    def get_tag(self):
+      return ('py3', 'none') + _bdist_wheel.get_tag(self)[2:]
+
+except ImportError:
+  CustomBdistWheel = None  # pylint: disable=invalid-name
+
 
 PROJECT_NAME = 'xprof'
 VERSION = version.__version__
 REQUIRED_PACKAGES = [
+    'absl-py >= 2.1.0',
     'gviz_api >= 1.9.0',
     'protobuf >= 3.19.6',
     'setuptools >= 41.0.0',
@@ -34,12 +50,20 @@ REQUIRED_PACKAGES = [
     'cheroot >= 10.0.1',
     'fsspec >= 2024.3.1',
     'gcsfs >= 2024.3.1',
+    'google-cloud-storage >= 3.12.0',
+    'urllib3 >= 2.7.0',
+    'fire >= 0.4.0',
 ]
 
 
 def get_readme():
   with open('README.md') as f:
     return f.read()
+
+
+cmdclass = {}
+if CustomBdistWheel:
+  cmdclass['bdist_wheel'] = CustomBdistWheel
 
 
 setuptools.setup(
@@ -57,21 +81,25 @@ setuptools.setup(
         exclude=['xprof.static'],
     ),
     package_data={
-        'xprof': ['static/**'],
-        '': ['_pywrap_profiler_plugin.so', '_pywrap_profiler_plugin.pyd'],
+        'xprof': [
+            'static/**',
+            'convert/profiler_plugin_c_api.so',
+            'convert/profiler_plugin_c_api.pyd',
+            'convert/profiler_plugin_c_api.dylib',
+            'convert/profiler_plugin_c_api.dll',
+        ],
     },
     entry_points={
         'tensorboard_plugins': [
-            (
-                'profile ='
-                ' xprof.profile_plugin_loader:ProfilePluginLoader'
-            ),
+            'profile = xprof.profile_plugin_loader:ProfilePluginLoader',
         ],
         'console_scripts': [
-            'xprof = xprof.server:main',
+            'xprof = xprof.cli.xprof_cli:main',
         ],
     },
-    python_requires='>= 2.7, != 3.0.*, != 3.1.*',
+    has_ext_modules=lambda: True,
+    cmdclass=cmdclass,
+    python_requires='>= 3.10',
     install_requires=REQUIRED_PACKAGES,
     tests_require=REQUIRED_PACKAGES,
     # PyPI package information.
@@ -80,7 +108,6 @@ setuptools.setup(
         'Intended Audience :: Education',
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 3',
         'Topic :: Scientific/Engineering :: Mathematics',
         'Topic :: Software Development :: Libraries :: Python Modules',

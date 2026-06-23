@@ -30,10 +30,10 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_protobuf//:protobuf",
         "@com_googlesource_code_re2//:re2",
         "@org_xprof//xprof/convert:file_utils",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
-        "@xla//xla/tsl/platform:env",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/profiler/utils:xplane_schema",
         "@xla//xla/tsl/profiler/utils:xplane_visitor",
@@ -50,7 +50,6 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:cord",
         "@com_google_protobuf//:protobuf",
@@ -92,6 +91,8 @@ cc_test(
     deps = [
         ":trace_processor",
         ":xprof_trace",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )

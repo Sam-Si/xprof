@@ -1,9 +1,9 @@
 #ifndef THIRD_PARTY_XPROF_FRONTEND_APP_COMPONENTS_TRACE_VIEWER_V2_TIMELINE_CONSTANTS_H_
 #define THIRD_PARTY_XPROF_FRONTEND_APP_COMPONENTS_TRACE_VIEWER_V2_TIMELINE_CONSTANTS_H_
 
-#include "third_party/dear_imgui/imgui.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/color/colors.h"
-#include "xprof/frontend/app/components/trace_viewer_v2/trace_helper/trace_event.h"
+#include "imgui.h"
+#include "frontend/app/components/trace_viewer_v2/color/colors.h"
+#include "frontend/app/components/trace_viewer_v2/trace_helper/trace_event.h"
 
 namespace traceviewer {
 
@@ -16,8 +16,12 @@ using Pixel = float;
 inline constexpr ImU32 kBlackColor = IM_COL32(0, 0, 0, 255);
 // Blue color with 100% opacity, rgba(0, 0, 255, 1).
 inline constexpr ImU32 kBlueColor = IM_COL32(0, 0, 255, 255);
+// Dark gray color for timing marker edges.
+inline constexpr ImU32 kDarkGrayColor = IM_COL32(100, 100, 100, 255);
 // A light gray line,  #E3E3E3 (GM3 Grey 90)
 inline constexpr ImU32 kLightGrayColor = IM_COL32(0xE3, 0xE3, 0xE3, 255);
+// Black color with 30% opacity for subtle dimming.
+inline constexpr ImU32 kSubtleDimmingColor = IM_COL32(0, 0, 0, 77);
 // White color with 30% opacity, rgba(255, 255, 255, 0.3).
 inline constexpr ImU32 kTransparentWhiteColor = IM_COL32(255, 255, 255, 77);
 // White color with 100% opacity, rgba(255, 255, 255, 1).
@@ -52,51 +56,64 @@ inline constexpr int kMinorTickDivisions = 5;
 // go/keep-sorted start
 inline constexpr ImDrawFlags kImDrawFlags = ImDrawFlags_RoundCornersDefault_;
 inline constexpr ImU32 kDefaultTextColor = kBlackColor;
+inline constexpr Microseconds kMinVisibleEventDuration = 1000.0;
 inline constexpr Pixel kCornerRounding = 0.0f;
 inline constexpr Pixel kDefaultLabelWidth = 250.0f;
-inline constexpr Pixel kEventHeight = 24.0f;
+inline constexpr Pixel kEventHeight = 23.0f;
 inline constexpr Pixel kEventMinimumDrawWidth = 2.0f;
-inline constexpr Pixel kEventPaddingBottom = 0.0f;
+inline constexpr Pixel kEventPaddingBottom = 1.0f;
 inline constexpr Pixel kEventPaddingRight = 1.0f;
 // The size of the visual indent for nested groups in the timeline, indicating
 // their nesting level.
 inline constexpr Pixel kIndentSize = 10.0f;
+inline constexpr Pixel kLabelPaddingLeft = 4.0f;
 inline constexpr Pixel kMinTextWidth = 5.0f;
+inline constexpr Pixel kMinUtilizationNormalization = 1.0f;
+inline constexpr Pixel kProcessTrackGap = 7.0f;
+inline constexpr Pixel kSplitterOffset = 4.0f;
+inline constexpr Pixel kSplitterWidth = 8.0f;
+inline constexpr Pixel kThreadTrackGap = 4.0f;
 // Padding on the right to prevent content from touching the window edge.
 inline constexpr Pixel kTimelinePaddingRight = 1.0f;
-inline constexpr Pixel kTrackVerticalGap = 5.0f;
+inline constexpr Pixel kToastCornerRounding = 4.0f;
+inline constexpr double kEpsilon = 0.001;
 // go/keep-sorted end
 
 // Highlighting Constants
 // go/keep-sorted start
+inline constexpr ImU32 kCounterHoverColor = kBlue80;
 inline constexpr ImU32 kHoverMaskColor = kTransparentWhiteColor;
 inline constexpr ImU32 kSelectedBorderColor = kBlueColor;
-// The corner rounding applied to hovered events. Set to half of `kEventHeight`
-// to create a half-circle effect on the ends of the event.
-inline constexpr Pixel kHoverCornerRounding = kEventHeight / 2.0f;
+inline constexpr Pixel kCounterHoverThickness = 3.5f;
+inline constexpr Pixel kHoverCornerRounding = 4.0f;
 inline constexpr Pixel kHoverPadding = 2.0f;
 // The radius of the circle used to draw points in the counter track.
 inline constexpr Pixel kPointRadius = 3.0f;
 inline constexpr Pixel kSelectedBorderThickness = 2.0f;
+// The opacity of the group preview (aggregated view) background.
+inline constexpr float kGroupPreviewOpacity = 0.6f;
 // go/keep-sorted end
 
 // Process Track Constants
 // go/keep-sorted start
 inline constexpr ImU32 kProcessTrackCollapsedColor = kInverseOnSurfaceColor;
-inline constexpr ImU32 kProcessTrackExpandedColor = kBlue80;
+inline constexpr ImU32 kProcessTrackExpandedColor = kSecondaryContainerColor;
+inline constexpr Pixel kProcessTrackHeight = 50.0f;
+// go/keep-sorted end
+
+// Nesting Level Constants
+// go/keep-sorted start
+inline constexpr int kCounterNestingLevel = 1;
+inline constexpr int kProcessNestingLevel = 0;
+inline constexpr int kThreadNestingLevel = 1;
 // go/keep-sorted end
 
 // Time Range Selection Constants
 // go/keep-sorted start
 // A solid blue for the curtain border. #A1C9FFFF at 100% opacity.
-inline constexpr ImU32 kSelectedTimeRangeBorderColor = 0xFFFFC9A1;
-// The color for the bottom of the selected time range gradient. #a1c9ff99 at
-// 60% opacity.
-inline constexpr ImU32 kSelectedTimeRangeBottomColor = 0x99FFC9A1;
-// The color for the top half of the selected time range gradient. #a1c9ff1a
-// at 10% opacity.
-inline constexpr ImU32 kSelectedTimeRangeTopColor = 0x1AFFC9A1;
+inline constexpr ImU32 kSelectedTimeRangeColor = 0xFFFFC9A1;
 inline constexpr Pixel kSelectedTimeRangeTextBottomPadding = 10.0f;
+inline constexpr Pixel kSelectedTimeRangeTextTopPadding = 5.0f;
 // go/keep-sorted end
 
 // Close Button Constants
@@ -105,6 +122,15 @@ inline constexpr ImU32 kCloseButtonColor = IM_COL32(128, 128, 128, 255);
 inline constexpr ImU32 kCloseButtonHoverColor = IM_COL32(100, 100, 100, 255);
 inline constexpr Pixel kCloseButtonPadding = 4.0f;
 inline constexpr Pixel kCloseButtonSize = 14.0f;
+inline constexpr Pixel kSelectedTimeRangeArrowHeadSize = 5.0f;
+inline constexpr Pixel kSelectedTimeRangeArrowPadding = 4.0f;
+// go/keep-sorted end
+
+// Mouse Interaction Constants
+// go/keep-sorted start
+// If the mouse moves more than 5 pixels (5*5=25) between mouse down and mouse
+// up, it's considered a drag, not a click.
+inline constexpr float kClickDistanceThresholdSquared = 25.0f;
 // go/keep-sorted end
 
 // Zooming and Panning Constants

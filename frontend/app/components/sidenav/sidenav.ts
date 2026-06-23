@@ -1,23 +1,33 @@
-import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Component, OnDestroy, OnInit, ChangeDetectionStrategy} from '@angular/core';
 import {MatCheckboxChange} from '@angular/material/checkbox';
 import {ActivatedRouteSnapshot, Router} from '@angular/router';
 import {Store} from '@ngrx/store';
-import {DEFAULT_HOST, HLO_TOOLS} from 'org_xprof/frontend/app/common/constants/constants';
+import {
+  DEFAULT_HOST,
+  HLO_TOOLS,
+} from 'org_xprof/frontend/app/common/constants/constants';
 import {NavigationEvent} from 'org_xprof/frontend/app/common/interfaces/navigation_event';
 import {RunToolsMap} from 'org_xprof/frontend/app/common/interfaces/tool';
 import {CommunicationService} from 'org_xprof/frontend/app/services/communication_service/communication_service';
 import {DataServiceV2} from 'org_xprof/frontend/app/services/data_service_v2/data_service_v2';
-import {setCurrentRunAction, setProfilerConfigAction, updateRunToolsMapAction} from 'org_xprof/frontend/app/store/actions';
-import {getCurrentRun, getRunToolsMap} from 'org_xprof/frontend/app/store/selectors';
+import {
+  setCurrentRunAction,
+  setProfilerConfigAction,
+  updateRunToolsMapAction,
+} from 'org_xprof/frontend/app/store/actions';
+import {
+  getCurrentRun,
+  getRunToolsMap,
+} from 'org_xprof/frontend/app/store/selectors';
 import {firstValueFrom, Observable, ReplaySubject} from 'rxjs';
 import {takeUntil} from 'rxjs/operators';
 
 /** A side navigation component. */
 @Component({
-  standalone: false,
+  changeDetection: ChangeDetectionStrategy.Default,standalone: false,
   selector: 'sidenav',
   templateUrl: './sidenav.ng.html',
-  styleUrls: ['./sidenav.scss']
+  styleUrls: ['./sidenav.scss'],
 })
 export class SideNav implements OnInit, OnDestroy {
   /** Handles on-destroy Subject, used to unsubscribe. */
@@ -35,33 +45,38 @@ export class SideNav implements OnInit, OnDestroy {
   selectedHostInternal = '';
   runPathInternal = '';
   sessionPathInternal = '';
+  labelInternal = '';
   selectedHostsInternal: string[] = [];
   selectedHostsPending: string[] = [];
   selectedModuleInternal = '';
-  navigationParams: {[key: string]: string|boolean} = {};
+  navigationParams: {[key: string]: string | boolean} = {};
   multiHostEnabledTools: string[] = ['trace_viewer', 'trace_viewer@'];
   allHostsSelected = false;
 
   hideCaptureProfileButton = false;
+  enableTabNameLabel = false;
 
   constructor(
-      private readonly router: Router,
-      // Using DataServiceV2 because methods used in sidenav is not defined in
-      // the interface. (b/423713470)
-      private readonly dataService: DataServiceV2,
-      private readonly communicationService: CommunicationService,
-      private readonly store: Store<{}>) {
-    this.runToolsMap$ =
-        this.store.select(getRunToolsMap).pipe(takeUntil(this.destroyed));
-    this.currentRun$ =
-        this.store.select(getCurrentRun).pipe(takeUntil(this.destroyed));
+    private readonly router: Router,
+    // Using DataServiceV2 because methods used in sidenav is not defined in
+    // the interface. (b/423713470)
+    private readonly dataService: DataServiceV2,
+    private readonly communicationService: CommunicationService,
+    private readonly store: Store<{}>,
+  ) {
+    this.runToolsMap$ = this.store
+      .select(getRunToolsMap)
+      .pipe(takeUntil(this.destroyed));
+    this.currentRun$ = this.store
+      .select(getCurrentRun)
+      .pipe(takeUntil(this.destroyed));
     // TODO(b/241842487): stream is not updated when the state change, should
     // trigger subscribe reactively
     this.runToolsMap$.subscribe((runTools: RunToolsMap) => {
       this.runToolsMap = runTools;
       this.runs = Object.keys(this.runToolsMap);
     });
-    this.currentRun$.subscribe(run => {
+    this.currentRun$.subscribe((run) => {
       if (run && !this.selectedRunInternal) {
         this.selectedRunInternal = run;
       }
@@ -79,27 +94,41 @@ export class SideNav implements OnInit, OnDestroy {
 
   // Getter for valid run given url router or user selection.
   get selectedRun() {
-    return this.runs.find(validRun => validRun === this.selectedRunInternal) ||
-        this.runs[0] || '';
+    return (
+      this.runs.find((validRun) => validRun === this.selectedRunInternal) ||
+      this.runs[0] ||
+      ''
+    );
   }
 
   // Getter for valid tag given url router or user selection.
   get selectedTag() {
-    return this.tags.find(
-               validTag => validTag.startsWith(this.selectedTagInternal)) ||
-        this.tags[0] || '';
+    return (
+      this.tags.find((validTag) =>
+        validTag.startsWith(this.selectedTagInternal),
+      ) ||
+      this.tags[0] ||
+      ''
+    );
   }
 
   // Getter for valid host given url router or user selection.
   get selectedHost() {
-    return this.hosts.find(host => host === this.selectedHostInternal) ||
-        this.hosts[0] || '';
+    return (
+      this.hosts.find((host) => host === this.selectedHostInternal) ||
+      this.hosts[0] ||
+      ''
+    );
   }
 
   get selectedModule() {
-    return this.moduleList.find(
-               module => module === this.selectedModuleInternal) ||
-        this.moduleList[0] || '';
+    return (
+      this.moduleList.find(
+        (module) => module === this.selectedModuleInternal,
+      ) ||
+      this.moduleList[0] ||
+      ''
+    );
   }
 
   get selectedHosts() {
@@ -109,8 +138,9 @@ export class SideNav implements OnInit, OnDestroy {
   // https://github.com/angular/angular/issues/11023#issuecomment-752228784
   mergeRouteParams(): Map<string, string> {
     const params = new Map<string, string>();
-    const stack: ActivatedRouteSnapshot[] =
-        [this.router.routerState.snapshot.root];
+    const stack: ActivatedRouteSnapshot[] = [
+      this.router.routerState.snapshot.root,
+    ];
     while (stack.length > 0) {
       const route = stack.pop();
       if (!route) continue;
@@ -126,7 +156,7 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   navigateWithUrl() {
-    let params: Map<string, string>|URLSearchParams;
+    let params: Map<string, string> | URLSearchParams;
     if (!!window.parent.location.search) {
       params = new URLSearchParams(window.parent.location.search);
     } else {
@@ -135,11 +165,13 @@ export class SideNav implements OnInit, OnDestroy {
     const run = params.get('run') ?? '';
     const tag = params.get('tool') ?? params.get('tag') ?? '';
     const host = params.get('host') ?? '';
-    const hostsParam = (params instanceof URLSearchParams) ?
-        params.getAll('hosts').join(',') :
-        params.get('hosts');
+    const hostsParam =
+      params instanceof URLSearchParams
+        ? params.getAll('hosts').join(',')
+        : params.get('hosts');
     const sessionPath = params.get('session_path') ?? '';
     const runPath = params.get('run_path') ?? '';
+    const label = params.get('label') ?? '';
     const opName = params.get('node_name') ?? params.get('opName') ?? '';
     const moduleName = params.get('module_name') ?? '';
     this.navigationParams['firstLoad'] = true;
@@ -151,10 +183,15 @@ export class SideNav implements OnInit, OnDestroy {
     this.selectedModuleInternal = moduleName;
     this.runPathInternal = runPath;
     this.sessionPathInternal = sessionPath;
+    this.labelInternal = label;
 
     if (this.multiHostEnabledTools.includes(tag)) {
       if (hostsParam) {
-        this.selectedHostsInternal = hostsParam.split(',');
+        let hostsList = hostsParam.split(',');
+        if (hostsList.length > 10) {
+          hostsList = hostsList.slice(0, 10);
+        }
+        this.selectedHostsInternal = hostsList;
       }
       this.selectedHostsPending = [...this.selectedHostsInternal];
       this.updateAllHostsSelectedState();
@@ -171,10 +208,12 @@ export class SideNav implements OnInit, OnDestroy {
 
   async fetchProfilerConfig() {
     const config = await firstValueFrom(
-        this.dataService.getConfig().pipe(takeUntil(this.destroyed)));
+      this.dataService.getConfig().pipe(takeUntil(this.destroyed)),
+    );
     if (config) {
       this.store.dispatch(setProfilerConfigAction({config}));
       this.hideCaptureProfileButton = config.hideCaptureProfileButton;
+      this.enableTabNameLabel = config.enableTabNameLabel ?? false;
     }
   }
 
@@ -202,9 +241,10 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   getDisplayTagName(tag: string): string {
-    const tagName = (tag && tag.length && (tag[tag.length - 1] === '@')) ?
-        tag.slice(0, -1) :
-        tag || '';
+    const tagName =
+      tag && tag.length && tag[tag.length - 1] === '@'
+        ? tag.slice(0, -1)
+        : tag || '';
 
     const toolsDisplayMap = new Map([
       ['overview_page', 'Overview Page'],
@@ -220,7 +260,7 @@ export class SideNav implements OnInit, OnDestroy {
       ['roofline_model', 'Roofline Model'],
       ['kernel_stats', 'Kernel Stats'],
       ['trace_viewer', 'Trace Viewer'],
-      ['megascale_stats', 'Megascale Stats'],
+      ['megascale_stats', 'Megascale Viewer'],
       ['perf_counters', 'Perf Counters'],
       ['utilization_viewer', 'Utilization Viewer'],
     ]);
@@ -228,28 +268,34 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   async getToolsForSelectedRun() {
-    const tools =
-        await firstValueFrom(this.dataService.getRunTools(this.selectedRun)
-                                 .pipe(takeUntil(this.destroyed)));
+    const tools = await firstValueFrom(
+      this.dataService
+        .getRunTools(this.selectedRun)
+        .pipe(takeUntil(this.destroyed)),
+    );
 
-    this.store.dispatch(updateRunToolsMapAction({
-      run: this.selectedRun,
-      tools,
-    }));
+    this.store.dispatch(
+      updateRunToolsMapAction({
+        run: this.selectedRun,
+        tools,
+      }),
+    );
     return tools;
   }
 
   async getHostsForSelectedTag() {
     if (!this.selectedRun || !this.selectedTag) return [];
     const response = await firstValueFrom(
-        this.dataService.getHosts(this.selectedRun, this.selectedTag)
-            .pipe(takeUntil(this.destroyed)));
+      this.dataService
+        .getHosts(this.selectedRun, this.selectedTag)
+        .pipe(takeUntil(this.destroyed)),
+    );
 
-    let hosts = response.map(host => host.hostname) || [];
+    let hosts = response.map((host) => host.hostname) || [];
     if (hosts.length === 0) {
       hosts.push('');
     }
-    hosts = hosts.map(host => {
+    hosts = hosts.map((host) => {
       if (host === null) {
         return '';
       } else if (host === '') {
@@ -262,9 +308,11 @@ export class SideNav implements OnInit, OnDestroy {
 
   async getModuleListForSelectedTag() {
     if (!this.selectedRun || !this.selectedTag) return [];
-    const response =
-        await firstValueFrom(this.dataService.getModuleList(this.selectedRun)
-                                 .pipe(takeUntil(this.destroyed)));
+    const response = await firstValueFrom(
+      this.dataService
+        .getModuleList(this.selectedRun)
+        .pipe(takeUntil(this.destroyed)),
+    );
     return response.split(',');
   }
 
@@ -274,16 +322,18 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   afterUpdateRun() {
-    this.store.dispatch(setCurrentRunAction({
-      currentRun: this.selectedRun,
-    }));
+    this.store.dispatch(
+      setCurrentRunAction({
+        currentRun: this.selectedRun,
+      }),
+    );
     this.updateTags();
   }
 
   async updateTags() {
     this.tags = this.runToolsMap[this.selectedRun] || [];
     if (!this.tags.length) {
-      this.tags = (await this.getToolsForSelectedRun() || []) as string[];
+      this.tags = ((await this.getToolsForSelectedRun()) || []) as string[];
     }
     this.afterUpdateTag();
   }
@@ -292,8 +342,9 @@ export class SideNav implements OnInit, OnDestroy {
     const previousSelectedTag = this.selectedTagInternal;
     this.selectedTagInternal = tag;
 
-    const isChangingToMultiHost = !previousSelectedTag ||
-        (this.isMultiHostsEnabled && previousSelectedTag !== this.selectedTag);
+    const isChangingToMultiHost =
+      !previousSelectedTag ||
+      (this.isMultiHostsEnabled && previousSelectedTag !== this.selectedTag);
 
     // Reset module and op selection when tool changes
     if (previousSelectedTag !== tag) {
@@ -321,7 +372,6 @@ export class SideNav implements OnInit, OnDestroy {
       }
 
       this.navigateTools();
-
     } else {
       this.afterUpdateTag();
     }
@@ -337,13 +387,14 @@ export class SideNav implements OnInit, OnDestroy {
     this.hosts = await this.getHostsForSelectedTag();
 
     if (this.isMultiHostsEnabled) {
+      this.selectedHostsInternal = this.selectedHostsInternal.filter(host => this.hosts.includes(host));
       if (this.selectedHostsInternal.length === 0 && this.hosts.length > 0) {
         this.selectedHostsInternal = [this.hosts[0]];
       }
       this.selectedHostsPending = [...this.selectedHostsInternal];
       this.updateAllHostsSelectedState();
     } else {
-      if (!this.selectedHostInternal && this.hosts.length > 0) {
+      if (!this.hosts.includes(this.selectedHostInternal) && this.hosts.length > 0) {
         this.selectedHostInternal = this.hosts[0];
       }
     }
@@ -360,8 +411,9 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   onHostsSelectionChange(selection: string[]) {
-    this.selectedHostsPending =
-        Array.isArray(selection) ? selection : [selection];
+    this.selectedHostsPending = Array.isArray(selection)
+      ? selection
+      : [selection];
     this.updateAllHostsSelectedState();
   }
 
@@ -371,11 +423,17 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   private updateAllHostsSelectedState() {
-    this.allHostsSelected = this.hosts.length > 0 &&
-        this.selectedHostsPending.length === this.hosts.length;
+    this.allHostsSelected =
+      this.hosts.length > 0 &&
+      this.selectedHostsPending.length === this.hosts.length;
   }
 
   onSubmitHosts() {
+    if (this.selectedHostsPending.length > 10) {
+      alert('Warning: Maximum 10 selected hosts allowed. Loading the first 10 hosts in alphabetical order.');
+      this.selectedHostsPending = this.selectedHostsPending.slice(0, 10);
+      this.updateAllHostsSelectedState();
+    }
     this.selectedHostsInternal = [...this.selectedHostsPending];
     this.navigateTools();
   }
@@ -386,14 +444,13 @@ export class SideNav implements OnInit, OnDestroy {
   }
 
   afterUpdateHost() {
-    if (!this.isMultiHostsEnabled || this.navigationParams['firstLoad']) {
-      this.navigateTools();
-    }
+    this.navigateTools();
   }
 
   // Helper function to serialize query parameters
-  private serializeQueryParams(
-      params: {[key: string]: string|string[]|boolean|undefined}): string {
+  private serializeQueryParams(params: {
+    [key: string]: string | string[] | boolean | undefined;
+  }): string {
     const searchParams = new URLSearchParams();
     for (const key in params) {
       if (params.hasOwnProperty(key)) {
@@ -420,18 +477,19 @@ export class SideNav implements OnInit, OnDestroy {
 
   updateUrlHistory() {
     const navigationEvent = this.getNavigationEvent();
-    const queryParams: {[key: string]: string|string[]|boolean|
-                        undefined} = {...navigationEvent};
+    const queryParams: {
+      [key: string]: string | string[] | boolean | undefined;
+    } = {...navigationEvent};
 
     if (this.isMultiHostsEnabled) {
       // For Trace Viewer, ensure 'hosts' is a comma-separated string in the URL
       if (queryParams['hosts'] && Array.isArray(queryParams['hosts'])) {
         queryParams['hosts'] = (queryParams['hosts'] as string[]).join(',');
       }
-      delete queryParams['host'];  // Remove single host param
+      delete queryParams['host']; // Remove single host param
     } else {
       // For other tools, ensure 'host' is used
-      delete queryParams['hosts'];  // Remove multi-host param
+      delete queryParams['hosts']; // Remove multi-host param
     }
 
     // Get current path to avoid changing the base URL
@@ -452,16 +510,45 @@ export class SideNav implements OnInit, OnDestroy {
     // routing
     // TODO - b/401596855: Deprecate the navigationEvent in route.params as we
     // are subscribing to the queryParams in the components.
-    this.router.navigate(
-        [
-          this.selectedTag || 'empty',
-          navigationEvent,
-        ],
-        {
-          queryParams: navigationEvent,
-        });
+    this.router.navigate([this.selectedTag || 'empty', navigationEvent], {
+      queryParams: navigationEvent,
+    });
     delete this.navigationParams['firstLoad'];
     this.updateUrlHistory();
+    this.updateTitle();
+  }
+
+  updateTitle() {
+    if (!this.enableTabNameLabel) {
+      return;
+    }
+    const toolName = this.getDisplayTagName(this.selectedTag);
+    let sessionName = '';
+
+    if (this.sessionPathInternal) {
+      const parts = this.sessionPathInternal.split('/').filter((p) => p.length > 0);
+      const pluginsIndex = parts.indexOf('plugins');
+      if (pluginsIndex > 0) {
+        sessionName = parts[pluginsIndex - 1];
+      } else {
+        sessionName = parts[parts.length - 1] || '';
+      }
+    }
+
+    if (!sessionName) {
+      sessionName = this.selectedRun;
+    }
+
+    let titleLabel = sessionName;
+    if (this.labelInternal) {
+      titleLabel += ` (${this.labelInternal})`;
+    }
+
+    if (titleLabel) {
+      document.title = `${titleLabel} | ${toolName} - XProf`;
+    } else {
+      document.title = `${toolName} - XProf`;
+    }
   }
 
   update() {

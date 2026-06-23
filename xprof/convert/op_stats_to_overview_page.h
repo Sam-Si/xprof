@@ -17,6 +17,7 @@ limitations under the License.
 #define XPROF_CONVERT_OP_STATS_TO_OVERVIEW_PAGE_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -62,6 +63,15 @@ OverviewPageRecommendation ComputeGenericRecommendation(
     const PrecisionStats& precision_stats);
 
 OverviewPageAnalysis ComputeAnalysisResult(const OpStats& op_stats);
+
+struct TpuPerformanceLimits {
+  double max_gigaflops_per_second = 0.0;
+  double max_gigabytes_per_second = 0.0;
+};
+
+bool ComputeTpuAnalysisResult(
+    const OpStats& op_stats, OverviewPageAnalysis* analysis,
+    std::optional<TpuPerformanceLimits> limits = std::nullopt);
 
 OverviewPageRunEnvironment ComputeRunEnvironment(
     const RunEnvironment& run_environment);

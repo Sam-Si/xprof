@@ -19,6 +19,8 @@ using EventData = absl::flat_hash_map<std::string, std::any>;
 
 // Following constants are used for event selected event.
 inline constexpr absl::string_view kEventSelected = "eventselected";
+inline constexpr absl::string_view kEventsSelected = "events_selected";
+inline constexpr absl::string_view kEventsSelectedData = "events_selected_data";
 
 inline constexpr absl::string_view kEventSelectedIndex = "eventIndex";
 inline constexpr absl::string_view kEventSelectedName = "name";
@@ -49,6 +51,10 @@ inline constexpr absl::string_view kViewportChanged = "viewport-changed";
 inline constexpr absl::string_view kViewportChangedRange = "range";
 inline constexpr absl::string_view kViewportChangedMin = "min_ms";
 inline constexpr absl::string_view kViewportChangedMax = "max_ms";
+
+// Constants for mouse mode changed event.
+inline constexpr absl::string_view kMouseModeChanged = "mouse_mode_changed";
+inline constexpr absl::string_view kMouseModeKey = "mouseMode";
 
 }  // namespace traceviewer
 

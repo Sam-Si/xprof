@@ -1,7 +1,6 @@
 #include "xprof/convert/streaming_trace_viewer_processor.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -11,6 +10,7 @@
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 #include "absl/time/clock.h"
@@ -20,7 +20,6 @@
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/file_system.h"
 #include "xla/tsl/platform/statusor.h"
-#include "xla/tsl/profiler/utils/timespan.h"
 #include "tsl/platform/cpu_info.h"
 #include "tsl/platform/path.h"
 #include "tsl/profiler/protobuf/xplane.pb.h"
@@ -29,17 +28,19 @@
 #include "xprof/convert/profile_processor_factory.h"
 #include "xprof/convert/repository.h"
 #include "xprof/convert/tool_options.h"
+#include "xprof/convert/trace_view_options.h"
+#include "xprof/convert/trace_viewer/delta_series/trace_data_to_compressed_delta_series_proto.h"
 #include "xprof/convert/trace_viewer/trace_events.h"
 #include "xprof/convert/trace_viewer/trace_events_to_json.h"
 #include "xprof/convert/trace_viewer/trace_options.h"
 #include "xprof/convert/trace_viewer/trace_viewer_visibility.h"
+#include "xprof/convert/unified_session_snapshot.h"
 #include "xprof/convert/xplane_to_trace_container.h"
 #include "xprof/convert/xprof_thread_pool_executor.h"
 
 namespace xprof {
 
-using internal::GetTraceViewOption;
-using internal::TraceViewOption;
+using ::tensorflow::profiler::GetTraceViewOption;
 using ::tensorflow::profiler::IOBufferAdapter;
 using ::tensorflow::profiler::JsonTraceOptions;
 using ::tensorflow::profiler::RawData;
@@ -49,14 +50,10 @@ using ::tensorflow::profiler::TraceDeviceType;
 using ::tensorflow::profiler::TraceEventsContainer;
 using ::tensorflow::profiler::TraceEventsLevelDbFilePaths;
 using ::tensorflow::profiler::TraceOptionsFromToolOptions;
-using ::tensorflow::profiler::TraceVisibilityFilter;
+using ::tensorflow::profiler::TraceViewOption;
 using ::tensorflow::profiler::XprofThreadPoolExecutor;
 using ::tensorflow::profiler::XSpace;
 
-namespace {
-// Traces with events less than threshold will be disabled from streaming.
-constexpr int64_t kDisableStreamingThreshold = 500000;
-}  // namespace
 
 absl::Status StreamingTraceViewerProcessor::ProcessSession(
     const SessionSnapshot& session_snapshot, const ToolOptions& options) {
@@ -75,13 +72,14 @@ absl::Status StreamingTraceViewerProcessor::ProcessSession(
   // TODO: b/452217676 - Optimize this to process hosts in parallel.
   for (int i = 0; i < session_snapshot.XSpaceSize(); ++i) {
     std::string host_name = session_snapshot.GetHostname(i);
-    auto trace_events_sstable_path = session_snapshot.MakeHostDataFilePath(
-        tensorflow::profiler::StoredDataType::TRACE_LEVELDB, host_name);
-    auto trace_events_metadata_sstable_path =
+    std::optional<std::string> trace_events_sstable_path =
+        session_snapshot.MakeHostDataFilePath(
+            tensorflow::profiler::StoredDataType::TRACE_LEVELDB, host_name);
+    std::optional<std::string> trace_events_metadata_sstable_path =
         session_snapshot.MakeHostDataFilePath(
             tensorflow::profiler::StoredDataType::TRACE_EVENTS_METADATA_LEVELDB,
             host_name);
-    auto trace_events_prefix_trie_sstable_path =
+    std::optional<std::string> trace_events_prefix_trie_sstable_path =
         session_snapshot.MakeHostDataFilePath(
             tensorflow::profiler::StoredDataType::
                 TRACE_EVENTS_PREFIX_TRIE_LEVELDB,
@@ -89,7 +87,7 @@ absl::Status StreamingTraceViewerProcessor::ProcessSession(
 
     if (!trace_events_sstable_path || !trace_events_metadata_sstable_path ||
         !trace_events_prefix_trie_sstable_path) {
-      return tsl::errors::Unimplemented(
+      return absl::UnimplementedError(
           "streaming trace viewer hasn't been supported in Cloud AI");
     }
 
@@ -102,7 +100,9 @@ absl::Status StreamingTraceViewerProcessor::ProcessSession(
                           session_snapshot.GetXSpace(i, &arena));
       PreprocessSingleHostXSpace(xspace, /*step_grouping=*/true,
                                  /*derived_timeline=*/true);
-      ProcessMegascaleDcn(xspace);
+      if (profiler_trace_options.enable_legacy_dcn) {
+        ProcessMegascaleDcn(xspace);
+      }
 
       TraceEventsContainer trace_container;
       ConvertXSpaceToTraceEventsContainer(host_name, *xspace,
@@ -136,33 +136,8 @@ absl::Status StreamingTraceViewerProcessor::ProcessSession(
 
     TraceEventsContainer trace_container;
     absl::Time load_start_time = absl::Now();
-    if (!trace_option.event_name.empty()) {
-      TF_RETURN_IF_ERROR(trace_container.ReadFullEventFromLevelDbTable(
-          *trace_events_metadata_sstable_path, *trace_events_sstable_path,
-          trace_option.event_name,
-          static_cast<uint64_t>(std::round(trace_option.start_time_ms * 1E9)),
-          static_cast<uint64_t>(std::round(trace_option.duration_ms * 1E9)),
-          trace_option.unique_id));
-    } else if (!trace_option.search_prefix.empty()) {  // Search Events Request
-      if (tsl::Env::Default()
-              ->FileExists(*trace_events_prefix_trie_sstable_path).ok()) {
-        auto trace_events_filter =
-            CreateTraceEventsFilterFromTraceOptions(profiler_trace_options);
-        TF_RETURN_IF_ERROR(trace_container.SearchInLevelDbTable(
-            file_paths,
-            trace_option.search_prefix, std::move(trace_events_filter)));
-      }
-    } else {
-      auto visibility_filter = std::make_unique<TraceVisibilityFilter>(
-          tsl::profiler::MilliSpan(trace_option.start_time_ms,
-                                   trace_option.end_time_ms),
-          trace_option.resolution, profiler_trace_options);
-      auto trace_events_filter =
-          CreateTraceEventsFilterFromTraceOptions(profiler_trace_options);
-      TF_RETURN_IF_ERROR(trace_container.LoadFromLevelDbTable(
-          file_paths, std::move(trace_events_filter),
-          std::move(visibility_filter), kDisableStreamingThreshold));
-    }
+    TF_RETURN_IF_ERROR(LoadTraceEventsContainer(
+        file_paths, trace_option, profiler_trace_options, &trace_container));
     LOG(INFO) << "Loaded trace container for host " << i
               << ". Duration: " << absl::Now() - load_start_time
               << " session_id: " << session_id;
@@ -173,28 +148,8 @@ absl::Status StreamingTraceViewerProcessor::ProcessSession(
               << " session_id: " << session_id;
   }
 
-  std::string trace_viewer_json;
-  JsonTraceOptions json_trace_options;
-
-  tensorflow::profiler::TraceDeviceType device_type =
-      tensorflow::profiler::TraceDeviceType::kUnknownDevice;
-  if (IsTpuTrace(merged_trace_container.trace())) {
-    device_type = TraceDeviceType::kTpu;
-  }
-  json_trace_options.details =
-      TraceOptionsToDetails(device_type, profiler_trace_options);
-  IOBufferAdapter adapter(&trace_viewer_json);
-  absl::Time json_start_time = absl::Now();
-  TraceEventsToJson<IOBufferAdapter, TraceEventsContainer, RawData>(
-      json_trace_options, merged_trace_container, &adapter);
-  LOG(INFO) << "TraceEventsToJson done. Duration: "
-            << absl::Now() - json_start_time << " session_id: " << session_id;
-
-  absl::Time set_output_start_time = absl::Now();
-  SetOutput(trace_viewer_json, "application/json");
-  LOG(INFO) << "SetOutput done. Duration: "
-            << absl::Now() - set_output_start_time
-            << " session_id: " << session_id;
+  TF_RETURN_IF_ERROR(SerializeAndSetOutput(merged_trace_container, trace_option,
+                                           profiler_trace_options, session_id));
 
   LOG(INFO)
       << "StreamingTraceViewerProcessor::ProcessSession done. Total Duration: "
@@ -211,8 +166,9 @@ absl::StatusOr<std::string> StreamingTraceViewerProcessor::Map(
   // get xspace from session snapshot
   std::string hostname = session_snapshot.GetHostname(0);
 
-  auto trace_events_sstable_path = session_snapshot.MakeHostDataFilePath(
-      tensorflow::profiler::StoredDataType::TRACE_LEVELDB, hostname);
+  std::optional<std::string> trace_events_sstable_path =
+      session_snapshot.MakeHostDataFilePath(
+          tensorflow::profiler::StoredDataType::TRACE_LEVELDB, hostname);
   if (trace_events_sstable_path &&
       tsl::Env::Default()->FileExists(*trace_events_sstable_path).ok()) {
     return *trace_events_sstable_path;
@@ -227,13 +183,14 @@ absl::StatusOr<std::string> StreamingTraceViewerProcessor::Map(
 absl::StatusOr<std::string> StreamingTraceViewerProcessor::Map(
     const SessionSnapshot& session_snapshot, const std::string& hostname,
     const XSpace& xspace) {
-  auto trace_events_sstable_path = session_snapshot.MakeHostDataFilePath(
-      tensorflow::profiler::StoredDataType::TRACE_LEVELDB, hostname);
-  auto trace_events_metadata_sstable_path =
+  std::optional<std::string> trace_events_sstable_path =
+      session_snapshot.MakeHostDataFilePath(
+          tensorflow::profiler::StoredDataType::TRACE_LEVELDB, hostname);
+  std::optional<std::string> trace_events_metadata_sstable_path =
       session_snapshot.MakeHostDataFilePath(
           tensorflow::profiler::StoredDataType::TRACE_EVENTS_METADATA_LEVELDB,
           hostname);
-  auto trace_events_prefix_trie_sstable_path =
+  std::optional<std::string> trace_events_prefix_trie_sstable_path =
       session_snapshot.MakeHostDataFilePath(
           tensorflow::profiler::StoredDataType::
               TRACE_EVENTS_PREFIX_TRIE_LEVELDB,
@@ -242,7 +199,7 @@ absl::StatusOr<std::string> StreamingTraceViewerProcessor::Map(
   if (!trace_events_sstable_path.has_value() ||
       !trace_events_metadata_sstable_path.has_value() ||
       !trace_events_prefix_trie_sstable_path.has_value()) {
-    return tsl::errors::Unimplemented(
+    return absl::UnimplementedError(
         "streaming trace viewer hasn't been supported in Cloud AI");
   }
 
@@ -251,7 +208,11 @@ absl::StatusOr<std::string> StreamingTraceViewerProcessor::Map(
     tensorflow::profiler::PreprocessSingleHostXSpace(&temp_xspace,
                                                      /*step_grouping=*/true,
                                                      /*derived_timeline=*/true);
-    tensorflow::profiler::ProcessMegascaleDcn(&temp_xspace);
+    tensorflow::profiler::TraceOptions profiler_trace_options =
+        TraceOptionsFromToolOptions(options_);
+    if (profiler_trace_options.enable_legacy_dcn) {
+      tensorflow::profiler::ProcessMegascaleDcn(&temp_xspace);
+    }
 
     TraceEventsContainer trace_container;
     tensorflow::profiler::ConvertXSpaceToTraceEventsContainer(
@@ -287,55 +248,31 @@ absl::StatusOr<TraceEventsContainer> LoadTraceContainerForHost(
   TraceEventsLevelDbFilePaths file_paths;
   file_paths.trace_events_file_path = trace_events_sstable_path;
   // These should exist as they were created in the Map phase.
-  auto metadata_path = session_snapshot.MakeHostDataFilePath(
-      tensorflow::profiler::StoredDataType::TRACE_EVENTS_METADATA_LEVELDB,
-      hostname);
-  auto trie_path = session_snapshot.MakeHostDataFilePath(
+  std::optional<std::string> metadata_path =
+      session_snapshot.MakeHostDataFilePath(
+          tensorflow::profiler::StoredDataType::TRACE_EVENTS_METADATA_LEVELDB,
+          hostname);
+  std::optional<std::string> trie_path = session_snapshot.MakeHostDataFilePath(
       tensorflow::profiler::StoredDataType::TRACE_EVENTS_PREFIX_TRIE_LEVELDB,
       hostname);
   if (!metadata_path.has_value() ||
       !tsl::Env::Default()->FileExists(*metadata_path).ok()) {
-    return tsl::errors::Internal("Could not find metadata file for host: ",
-                                 hostname,
-                                 ", path: ", metadata_path.value_or(""));
+    return absl::InternalError(
+        absl::StrCat("Could not find metadata file for host: ", hostname,
+                     ", path: ", metadata_path.value_or("")));
   }
   if (!trie_path.has_value() ||
       !tsl::Env::Default()->FileExists(*trie_path).ok()) {
-    return tsl::errors::Internal("Could not find trie file for host: ",
-                                 hostname, ", path: ", trie_path.value_or(""));
+    return absl::InternalError(
+        absl::StrCat("Could not find trie file for host: ", hostname,
+                     ", path: ", trie_path.value_or("")));
   }
   file_paths.trace_events_metadata_file_path = *metadata_path;
   file_paths.trace_events_prefix_trie_file_path = *trie_path;
 
   TraceEventsContainer trace_container;
-  if (!trace_option.event_name.empty()) {
-    TF_RETURN_IF_ERROR(trace_container.ReadFullEventFromLevelDbTable(
-        file_paths.trace_events_metadata_file_path,
-        file_paths.trace_events_file_path, trace_option.event_name,
-        static_cast<uint64_t>(std::round(trace_option.start_time_ms * 1E9)),
-        static_cast<uint64_t>(std::round(trace_option.duration_ms * 1E9)),
-        trace_option.unique_id));
-  } else if (!trace_option.search_prefix.empty()) {  // Search Events Request
-    if (tsl::Env::Default()
-            ->FileExists(file_paths.trace_events_prefix_trie_file_path)
-            .ok()) {
-      auto trace_events_filter =
-          CreateTraceEventsFilterFromTraceOptions(profiler_trace_options);
-      TF_RETURN_IF_ERROR(trace_container.SearchInLevelDbTable(
-          file_paths, trace_option.search_prefix,
-          std::move(trace_events_filter)));
-    }
-  } else {
-    auto visibility_filter = std::make_unique<TraceVisibilityFilter>(
-        tsl::profiler::MilliSpan(trace_option.start_time_ms,
-                                 trace_option.end_time_ms),
-        trace_option.resolution, profiler_trace_options);
-    auto trace_events_filter =
-        CreateTraceEventsFilterFromTraceOptions(profiler_trace_options);
-    TF_RETURN_IF_ERROR(trace_container.LoadFromLevelDbTable(
-        file_paths, std::move(trace_events_filter),
-        std::move(visibility_filter), kDisableStreamingThreshold));
-  }
+  TF_RETURN_IF_ERROR(LoadTraceEventsContainer(
+      file_paths, trace_option, profiler_trace_options, &trace_container));
   return trace_container;
 }
 
@@ -394,31 +331,62 @@ absl::Status StreamingTraceViewerProcessor::Reduce(
     return absl::InternalError("No hosts with valid trace data.");
   }
 
-  std::string trace_viewer_json;
-  JsonTraceOptions json_trace_options;
-
-  tensorflow::profiler::TraceDeviceType device_type =
-      tensorflow::profiler::TraceDeviceType::kUnknownDevice;
-  if (IsTpuTrace(merged_trace_container.trace())) {
-    device_type = TraceDeviceType::kTpu;
-  }
-  json_trace_options.details =
-      TraceOptionsToDetails(device_type, profiler_trace_options);
-  IOBufferAdapter adapter(&trace_viewer_json);
-  absl::Time json_start_time = absl::Now();
-  TraceEventsToJson<IOBufferAdapter, TraceEventsContainer, RawData>(
-      json_trace_options, merged_trace_container, &adapter);
-  LOG(INFO) << "TraceEventsToJson done. Duration: "
-            << absl::Now() - json_start_time << " session_id: " << session_id;
-
-  absl::Time set_output_start_time = absl::Now();
-  SetOutput(trace_viewer_json, "application/json");
-  LOG(INFO) << "SetOutput done. Duration: "
-            << absl::Now() - set_output_start_time
-            << " session_id: " << session_id;
+  TF_RETURN_IF_ERROR(SerializeAndSetOutput(merged_trace_container, trace_option,
+                                           profiler_trace_options, session_id));
 
   LOG(INFO) << "StreamingTraceViewerProcessor::Reduce done. Total Duration: "
             << absl::Now() - start_time << " session_id: " << session_id;
+  return absl::OkStatus();
+}
+
+absl::Status StreamingTraceViewerProcessor::SerializeAndSetOutput(
+    const TraceEventsContainer& merged_trace_container,
+    const TraceViewOption& trace_option,
+    const tensorflow::profiler::TraceOptions& profiler_trace_options,
+    absl::string_view session_id) {
+  if (trace_option.format == "pb") {
+    tensorflow::profiler::TraceDeviceType device_type =
+        tensorflow::profiler::TraceDeviceType::kUnknownDevice;
+    if (IsTpuTrace(merged_trace_container.trace())) {
+      device_type = TraceDeviceType::kTpu;
+    }
+    tensorflow::profiler::DeltaSeriesProtoConversionOptions proto_options;
+    proto_options.details =
+        TraceOptionsToDetails(device_type, profiler_trace_options);
+    absl::StatusOr<std::string> compressed_result =
+        tensorflow::profiler::ConvertTraceDataToCompressedDeltaSeriesProto(
+            proto_options, merged_trace_container);
+    if (compressed_result.ok()) {
+      SetOutput(*compressed_result, "application/octet-stream");
+    } else {
+      LOG(ERROR) << "Failed to convert trace data: "
+                 << compressed_result.status();
+      return compressed_result.status();
+    }
+  } else {
+    std::string trace_viewer_json;
+    JsonTraceOptions json_trace_options;
+
+    tensorflow::profiler::TraceDeviceType device_type =
+        tensorflow::profiler::TraceDeviceType::kUnknownDevice;
+    if (IsTpuTrace(merged_trace_container.trace())) {
+      device_type = TraceDeviceType::kTpu;
+    }
+    json_trace_options.details =
+        TraceOptionsToDetails(device_type, profiler_trace_options);
+    IOBufferAdapter adapter(&trace_viewer_json);
+    absl::Time json_start_time = absl::Now();
+    TraceEventsToJson<IOBufferAdapter, TraceEventsContainer, RawData>(
+        json_trace_options, merged_trace_container, &adapter);
+    LOG(INFO) << "TraceEventsToJson done. Duration: "
+              << absl::Now() - json_start_time << " session_id: " << session_id;
+
+    absl::Time set_output_start_time = absl::Now();
+    SetOutput(trace_viewer_json, "application/json");
+    LOG(INFO) << "SetOutput done. Duration: "
+              << absl::Now() - set_output_start_time
+              << " session_id: " << session_id;
+  }
   return absl::OkStatus();
 }
 

@@ -1,4 +1,4 @@
-<div [hidden]="!useTraceViewerV2">
+<div [hidden]="!useTraceViewerV2" class="trace-viewer-component">
   <ng-container *ngIf="traceViewerV2LoadingStatus === TraceViewerV2LoadingStatus.ERROR">
     <div class="error-overlay">
       <mat-icon>error</mat-icon>
@@ -7,22 +7,95 @@
   </ng-container>
   <ng-container *ngIf="traceViewerV2LoadingStatus !== TraceViewerV2LoadingStatus.IDLE && traceViewerV2LoadingStatus !== TraceViewerV2LoadingStatus.ERROR">
     <div *ngIf="isInitialLoading" class="loading-overlay">
-      <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      <mat-progress-bar mode="indeterminate" aria-label="Loading trace data"></mat-progress-bar>
       <div class="loading-status">{{traceViewerV2LoadingStatus}}</div>
       <div class="tutorial">{{tutorials[currentTutorialIndex]}}</div>
     </div>
   </ng-container>
-  <div class="search-container">
-    <mat-form-field appearance="outline">
-      <input matInput #searchBox placeholder="Search events" aria-label="Search trace events" (input)="onSearchEvent(searchBox.value)" />
+  <div #searchContainer class="search-container">
+    <mat-form-field appearance="outline" class="search-form-field">
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput #searchBox placeholder="Search events" aria-label="Search trace events" (input)="onSearchEvent(searchBox.value)" (keydown.enter)="nextSearchResult()" />
+      <div matSuffix class="search-suffix">
+        <ng-container *ngIf="currentSearchQuery">
+          <span class="search-result-count" role="status" aria-live="polite">{{searchResultCountText}}</span>
+          <div class="search-divider"></div>
+          <button mat-icon-button aria-label="Previous search result" (click)="prevSearchResult()" (keydown.enter)="prevSearchResult()" class="search-arrow-btn">
+            <mat-icon>keyboard_arrow_up</mat-icon>
+          </button>
+          <button mat-icon-button aria-label="Next search result" (click)="nextSearchResult()" (keydown.enter)="nextSearchResult()" class="search-arrow-btn">
+            <mat-icon>keyboard_arrow_down</mat-icon>
+          </button>
+          <button mat-icon-button aria-label="Clear search" (click)="clearSearch(searchBox)" (keydown.enter)="clearSearch(searchBox)" class="search-clear-btn">
+            <mat-icon>close</mat-icon>
+          </button>
+        </ng-container>
+      </div>
     </mat-form-field>
-    <div *ngIf="currentSearchQuery" class="search-result-count">{{searchResultCountText}}</div>
-    <button mat-icon-button aria-label="Previous search result" (click)="prevSearchResult()" [disabled]="!currentSearchQuery">
-      <mat-icon>chevron_left</mat-icon>
-    </button>
-    <button mat-icon-button aria-label="Next search result" (click)="nextSearchResult()" [disabled]="!currentSearchQuery">
-      <mat-icon>chevron_right</mat-icon>
-    </button>
+    <div class="mouse-mode-container">
+      <button #selectBtn mat-icon-button [class.active]="currentMouseMode === MouseMode.SELECT" (click)="setMouseMode(MouseMode.SELECT)" title="Select Mode" aria-label="Select Mode">
+        <svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g clip-path="url(#clip0_71_476)">
+            <path d="M15.1875 22L12.3125 15.8542L9 20V6L20 15H14.125L17 21.1458L15.1875 22Z" fill="#444746"/>
+          </g>
+          <defs>
+            <clipPath id="clip0_71_476">
+              <rect width="20" height="20" fill="white" transform="translate(4 4)"/>
+            </clipPath>
+          </defs>
+        </svg>
+      </button>
+      <button #panBtn mat-icon-button [class.active]="currentMouseMode === MouseMode.PAN" (click)="setMouseMode(MouseMode.PAN)" title="Pan Mode" aria-label="Pan Mode">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g clip-path="url(#clip0_71_473)">
+            <path d="M10 18L6.5 14.5L7.5625 13.4375L9.25 15.125V10.75H4.875L6.5625 12.4375L5.5 13.5L2 10L5.5 6.5L6.5625 7.5625L4.875 9.25H9.25V4.875L7.5625 6.5625L6.5 5.5L10 2L13.5 5.5L12.4375 6.5625L10.75 4.875V9.25H15.125L13.4375 7.5625L14.5 6.5L18 10L14.5 13.5L13.4375 12.4375L15.125 10.75H10.75V15.125L12.4375 13.4375L13.5 14.5L10 18Z" fill="#444746"/>
+          </g>
+          <defs>
+            <clipPath id="clip0_71_473">
+              <rect width="20" height="20" fill="white"/>
+            </clipPath>
+          </defs>
+        </svg>
+      </button>
+      <button #zoomBtn mat-icon-button [class.active]="currentMouseMode === MouseMode.ZOOM" (click)="setMouseMode(MouseMode.ZOOM)" title="Zoom Mode" aria-label="Zoom Mode">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g clip-path="url(#clip0_71_470)">
+            <path d="M10 17L7 14L8.0625 12.9375L9.25 14.125V5.875L8.0625 7.0625L7 6L10 3L13 6L11.9375 7.0625L10.75 5.875V14.125L11.9375 12.9375L13 14L10 17Z" fill="#444746"/>
+          </g>
+          <defs>
+            <clipPath id="clip0_71_470">
+              <rect width="20" height="20" fill="white"/>
+            </clipPath>
+          </defs>
+        </svg>
+      </button>
+      <div class="timing-button-wrapper">
+        <button #timingBtn mat-icon-button [class.active]="currentMouseMode === MouseMode.TIMING" (click)="setMouseMode(MouseMode.TIMING)" title="Measure Mode" aria-label="Measure Mode">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g clip-path="url(#clip0_71_467)">
+            <path d="M18 16H16.5V4H18V16ZM15 10L12 13L10.9375 11.9375L12.125 10.75H7.875L9.0625 11.9375L8 13L5 10L8 7L9.0625 8.0625L7.875 9.25H12.125L10.9375 8.0625L12 7L15 10ZM3.5 16H2L2 4H3.5L3.5 16Z" fill="#444746"/>
+          </g>
+          <defs>
+            <clipPath id="clip0_71_467">
+              <rect width="20" height="20" fill="white" transform="matrix(0 -1 1 0 0 20)"/>
+            </clipPath>
+          </defs>
+        </svg>
+      </button>
+        <!-- Coach Mark Bubble -->
+        <div *ngIf="showTimingOnboarding" class="coach-mark-bubble">
+          <div class="coach-mark-title">Measure Mode</div>
+          <div class="coach-mark-content">
+            You are now in Measure mode. Click and drag on the timeline to select a time range. You can also use <b>Shift + Drag</b> or <b>Shift + Click</b> in other modes to measure. <br><br>Tip: You can press '4' to quickly enter this mode.
+          </div>
+          <div class="coach-mark-actions">
+            <button mat-button class="coach-mark-button" (click)="dismissTimingOnboarding()">Got it</button>
+          </div>
+          <!-- Arrow -->
+          <div class="coach-mark-arrow"></div>
+        </div>
+      </div>
+    </div>
     <div class="spacer"></div>
     <div class="incremental-loading" *ngIf="searching || (!isInitialLoading && traceViewerV2LoadingStatus !== TraceViewerV2LoadingStatus.IDLE && traceViewerV2LoadingStatus !== TraceViewerV2LoadingStatus.ERROR)">
       <div class="loading-status">Loading more data...</div>
@@ -30,37 +103,114 @@
     </div>
   </div>
   <div class="main-content-area">
-    <as-split direction="vertical">
-      <as-split-area [size]="selectedEvent ? 70 : 100">
- -->
-        <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
- -->
+    <as-split direction="vertical" (dragEnd)="onDragEnd($event)">
+      <as-split-area [size]="timelineHeightPercent">
+        <div class="canvas-container">
+          <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" (mousedown)="blurActiveElement()"></canvas>
+        </div>
       </as-split-area>
-      <as-split-area [size]="selectedEvent ? 30 : 0" [visible]="!!selectedEvent">
+      <as-split-area [size]="detailHeightPercent" [visible]="!!selectedEvent">
         <div *ngIf="selectedEvent" #drawer class="drawer">
           <div class="event-detail-table-container">
-            <table mat-table class="event-detail-table" [dataSource]="selectedEventProperties">
-              <!-- Key Column -->
-              <ng-container matColumnDef="property">
-                <td mat-cell *matCellDef="let element"> {{element.property}} </td>
-              </ng-container>
+            <div *ngIf="isSingleEventTable()" class="single-event-details">
+              <as-split direction="horizontal" style="min-height: 150px; width: 100%;">
+                <as-split-area [size]="60" class="split-area-left">
+                  <h3>{{selectedEvent.name}}</h3>
+                  <div class="detail-row" *ngFor="let prop of leftSideProperties">
+                    <span class="detail-label">{{prop.property}}:</span>
+                    <span class="detail-value">{{prop.value}}</span>
+                  </div>
+                </as-split-area>
+                <as-split-area [size]="40" class="split-area-right">
+                  <div class="detail-row" *ngFor="let prop of rightSideProperties">
+                    <span class="detail-label">{{prop.property}}:</span>
+                    <span class="detail-value">{{prop.value}}</span>
+                  </div>
+                  <div class="cross-tool-links">
+                    <div *ngIf="selectedEvent.stackTraceLinkHtml" [innerHTML]="selectedEvent.stackTraceLinkHtml"></div>
+                    <div *ngIf="selectedEvent.rooflineModelLinkHtml" [innerHTML]="selectedEvent.rooflineModelLinkHtml"></div>
+                    <div *ngIf="selectedEvent.graphViewerLinkHtml" [innerHTML]="selectedEvent.graphViewerLinkHtml"></div>
+                  </div>
+                </as-split-area>
+              </as-split>
+            </div>
 
-              <!-- Value Column -->
-              <ng-container matColumnDef="value">
-                <td mat-cell *matCellDef="let element" style="word-break: break-word;"> {{element.value}} </td>
-              </ng-container>
+            <div *ngIf="!isSingleEventTable()">
+              <mat-tab-group *ngIf="metricsDataSource.data.length > 0 && countersDataSource.data.length > 0">
+                <mat-tab label="Profile Metrics">
+                  <ng-template matTabContent>
+                    <ng-container *ngTemplateOutlet="metricsTable"></ng-container>
+                  </ng-template>
+                </mat-tab>
+                <mat-tab label="Counters">
+                  <ng-template matTabContent>
+                    <ng-container *ngTemplateOutlet="countersTable"></ng-container>
+                  </ng-template>
+                </mat-tab>
+              </mat-tab-group>
 
-              <tr mat-row *matRowDef="let row; columns: eventDetailColumns;"></tr>
-            </table>
-            <div *ngIf="selectedEvent.stackTraceLinkHtml" [innerHTML]="selectedEvent.stackTraceLinkHtml"></div>
-            <div *ngIf="selectedEvent.rooflineModelLinkHtml" [innerHTML]="selectedEvent.rooflineModelLinkHtml"></div>
-            <div *ngIf="selectedEvent.graphViewerLinkHtml" [innerHTML]="selectedEvent.graphViewerLinkHtml"></div>
+              <div *ngIf="!(metricsDataSource.data.length > 0 && countersDataSource.data.length > 0)">
+                <ng-container *ngIf="metricsDataSource.data.length > 0">
+                  <ng-container *ngTemplateOutlet="metricsTable"></ng-container>
+                </ng-container>
+                <ng-container *ngIf="countersDataSource.data.length > 0">
+                  <ng-container *ngTemplateOutlet="countersTable"></ng-container>
+                </ng-container>
+              </div>
+            </div>
+
+            <ng-template #metricsTable>
+              <table mat-table matSort class="event-detail-table" [dataSource]="metricsDataSource">
+                <ng-container *ngFor="let col of metricsColumns" [matColumnDef]="col">
+                  <th mat-header-cell *matHeaderCellDef mat-sort-header style="resize: horizontal; overflow: hidden; padding-right: 16px;">
+                    {{ getColumnHeader(col) }}
+                  </th>
+                  <td mat-cell *matCellDef="let element" style="word-break: break-word;">
+                    {{ getCellContent(element, col) }}
+                  </td>
+                  <td mat-footer-cell *matFooterCellDef>
+                    <ng-container *ngIf="col === 'name'"><strong>Totals</strong></ng-container>
+                    <ng-container *ngIf="col === 'occurrences'"><strong>{{ getTotal('occurrences', metricsDataSource) }}</strong></ng-container>
+                    <ng-container *ngIf="col === 'wallDuration'"><strong>{{ getTotal('wallDuration', metricsDataSource) | number:'1.2-2' }}us</strong></ng-container>
+                    <ng-container *ngIf="col === 'selfTime'"><strong>{{ getTotal('selfTime', metricsDataSource) | number:'1.2-2' }}us</strong></ng-container>
+                    <ng-container *ngIf="col === 'avgWallDuration'"><strong>{{ (getTotal('wallDuration', metricsDataSource) / (getTotal('occurrences', metricsDataSource) || 1)) | number:'1.2-2' }}us</strong></ng-container>
+                  </td>
+                </ng-container>
+
+                <tr mat-header-row *matHeaderRowDef="metricsColumns; sticky: true"></tr>
+                <tr mat-row *matRowDef="let row; columns: metricsColumns;"></tr>
+                <tr mat-footer-row *matFooterRowDef="metricsColumns; sticky: true"></tr>
+              </table>
+            </ng-template>
+
+            <ng-template #countersTable>
+              <table mat-table matSort class="event-detail-table" [dataSource]="countersDataSource">
+                <ng-container *ngFor="let col of counterColumns" [matColumnDef]="col">
+                  <th mat-header-cell *matHeaderCellDef mat-sort-header style="resize: horizontal; overflow: hidden; padding-right: 16px;">
+                    {{ getColumnHeader(col) }}
+                  </th>
+                  <td mat-cell *matCellDef="let element" style="word-break: break-word;">
+                    {{ getCellContent(element, col) }}
+                  </td>
+                </ng-container>
+
+                <tr mat-header-row *matHeaderRowDef="counterColumns; sticky: true"></tr>
+                <tr mat-row *matRowDef="let row; columns: counterColumns;"></tr>
+              </table>
+            </ng-template>
+
+            <div *ngIf="selectionStartFormat" class="selection-info" style="margin-top: 16px;">
+              Selection Start: {{ selectionStartFormat }}
+            </div>
+            <div *ngIf="selectionExtentFormat" class="selection-info">
+              Selection Extent: {{ selectionExtentFormat }}
+            </div>
           </div>
         </div>
       </as-split-area>
     </as-split>
   </div>
 </div>
-<div [hidden]="useTraceViewerV2">
+<div [hidden]="useTraceViewerV2" class="trace-viewer-component">
   <iframe #tvIframe [src]="url | safe" onload="focus();"></iframe>
 </div>

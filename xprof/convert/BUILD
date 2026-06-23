@@ -18,16 +18,16 @@ cc_library(
 )
 
 cc_library(
-    name = "tpuv7generic_utilization_utils",
-    srcs = ["tpuv7generic_utilization_utils.cc"],
-    hdrs = ["tpuv7generic_utilization_utils.h"],
+    name = "tpu_generic_utilization_utils",
+    srcs = ["tpu_generic_utilization_utils.cc"],
+    hdrs = ["tpu_generic_utilization_utils.h"],
     deps = [
         ":tpu_counter_util",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
-        "@org_xprof//xprof/utils:tpu_counter_ids_v7",
+        "@org_xprof//xprof/utils:tpu_counter_ids_v6e",
         "@org_xprof//xprof/utils:tpu_counter_ids_v7x",
         "@xla//xla/tsl/profiler/utils:math_utils",
     ],
@@ -44,6 +44,67 @@ cc_library(
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "unified_session_snapshot",
+    hdrs = ["unified_session_snapshot.h"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+    ],
+)
+
+cc_library(
+    name = "unified_profile_processor",
+    hdrs = ["unified_profile_processor.h"],
+    deps = [
+        ":tool_options",
+        ":unified_session_snapshot",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+    ],
+)
+
+cc_library(
+    name = "unified_profile_processor_factory",
+    srcs = ["unified_profile_processor_factory.cc"],
+    hdrs = ["unified_profile_processor_factory.h"],
+    deps = [
+        ":tool_options",
+        ":unified_profile_processor",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_test(
+    name = "unified_profile_processor_factory_test",
+    srcs = ["unified_profile_processor_factory_test.cc"],
+    deps = [
+        ":repository",
+        ":tool_options",
+        ":unified_profile_processor",
+        ":unified_profile_processor_factory",
+        ":unified_session_snapshot",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
     ],
 )
 
@@ -119,6 +180,72 @@ cc_library(
         "@xla//xla/tsl/platform:env",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "base_op_stats_processor",
+    srcs = ["base_op_stats_processor.cc"],
+    hdrs = ["base_op_stats_processor.h"],
+    deps = [
+        ":file_utils",
+        ":multi_xplanes_to_op_stats",
+        ":op_stats_combiner",
+        ":preprocess_single_host_xplane",
+        ":repository",
+        ":tool_options",
+        ":unified_profile_processor",
+        ":unified_session_snapshot",
+        ":xplane_to_op_stats",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@org_xprof//xprof/utils:hardware_type_utils",
+        "@org_xprof//xprof/utils:step_intersection",
+        "@tsl//tsl/platform:path",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/platform:env",
+        "@xla//xla/tsl/platform:errors",
+        "@xla//xla/tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "unified_hlo_stats_processor",
+    srcs = ["unified_hlo_stats_processor.cc"],
+    hdrs = ["unified_hlo_stats_processor.h"],
+    deps = [
+        ":base_op_stats_processor",
+        ":op_stats_to_hlo_stats",
+        ":tool_options",
+        ":unified_profile_processor_factory",
+        ":unified_session_snapshot",
+        "@com_google_absl//absl/status",
+        "@org_xprof//plugin/xprof/protobuf:hlo_stats_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+    ],
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "unified_op_profile_processor",
+    srcs = ["unified_op_profile_processor.cc"],
+    hdrs = ["unified_op_profile_processor.h"],
+    deps = [
+        ":base_op_stats_processor",
+        ":op_stats_to_op_profile",
+        ":tool_options",
+        ":unified_session_snapshot",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@org_xprof//plugin/xprof/protobuf:op_profile_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@org_xprof//xprof/utils:hardware_type_utils",
+        "@tsl//tsl/platform:protobuf",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
     ],
 )
 
@@ -213,7 +340,6 @@ cc_library(
         "@org_xprof//xprof/utils:hlo_proto_to_module",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/hlo/ir:hlo",
-        "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
     ],
     alwayslink = 1,
@@ -229,6 +355,7 @@ cc_library(
         ":profile_processor_factory",
         ":repository",
         ":tool_options",
+        ":xplane_to_trace_container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -236,6 +363,7 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_protobuf//:protobuf",
         "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@org_xprof//xprof/convert/trace_viewer/delta_series:trace_data_to_compressed_delta_series_proto",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
@@ -255,6 +383,8 @@ cc_library(
         ":profile_processor_factory",
         ":repository",
         ":tool_options",
+        ":trace_view_options",
+        ":unified_session_snapshot",
         ":xplane_to_trace_container",
         ":xprof_thread_pool_executor",
         "@com_google_absl//absl/log",
@@ -269,6 +399,7 @@ cc_library(
         "@org_xprof//xprof/convert/trace_viewer:trace_events_to_json",
         "@org_xprof//xprof/convert/trace_viewer:trace_options",
         "@org_xprof//xprof/convert/trace_viewer:trace_viewer_visibility",
+        "@org_xprof//xprof/convert/trace_viewer/delta_series:trace_data_to_compressed_delta_series_proto",
         "@tsl//tsl/platform:path",
         "@tsl//tsl/platform:platform_port",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
@@ -283,15 +414,22 @@ cc_library(
 cc_test(
     name = "streaming_trace_viewer_processor_test",
     srcs = ["streaming_trace_viewer_processor_test.cc"],
+    data = [
+        "@org_xprof//xprof/convert/test_xplanes:gpu_training_2.xplane.pb",
+    ],
     deps = [
         ":file_utils",
         ":repository",
         ":streaming_trace_viewer_processor",
         ":tool_options",
+        ":trace_view_options",
+        ":unified_session_snapshot",
+        ":xplane_to_trace_container",
         "//file/base:path",
         "//file/util:temp_path",
         "@com_github_nlohmann_json//:json",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -571,6 +709,66 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "base_op_stats_processor_test",
+    srcs = ["base_op_stats_processor_test.cc"],
+    deps = [
+        ":base_op_stats_processor",
+        ":file_utils",
+        ":repository",
+        ":tool_options",
+        ":unified_session_snapshot",
+        "//file/base",
+        "//file/base:options_cc",
+        "//file/base:path",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/platform:env",
+    ],
+)
+
+cc_test(
+    name = "unified_hlo_stats_processor_test",
+    srcs = ["unified_hlo_stats_processor_test.cc"],
+    deps = [
+        ":base_op_stats_processor",
+        ":file_utils",
+        ":repository",
+        ":tool_options",
+        ":unified_hlo_stats_processor",
+        ":unified_profile_processor_factory",
+        "//file/base",
+        "//file/base:options_cc",
+        "//file/base:path",
+        "//third_party/jsoncpp:json_compat",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@jsoncpp_git//:jsoncpp",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+    ],
+)
+
+cc_test(
+    name = "unified_op_profile_processor_test",
+    srcs = ["unified_op_profile_processor_test.cc"],
+    deps = [
+        ":file_utils",
+        ":repository",
+        ":tool_options",
+        ":unified_op_profile_processor",
+        ":unified_op_profile_processor_registration",
+        ":unified_profile_processor_factory",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:path",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/platform:env",
+    ],
+)
+
 cc_library(
     name = "xplane_to_op_metrics_db",
     srcs = ["xplane_to_op_metrics_db.cc"],
@@ -592,7 +790,6 @@ cc_library(
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/lib/gtl:map_util",
         "@xla//xla/tsl/platform:logging",
-        "@xla//xla/tsl/platform:types",
         "@xla//xla/tsl/profiler/utils:tf_op_utils",
         "@xla//xla/tsl/profiler/utils:tf_xplane_visitor",
         "@xla//xla/tsl/profiler/utils:timespan",
@@ -616,6 +813,7 @@ cc_test(
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
         "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:source_info_proto_cc",
         "@org_xprof//xprof/utils:hlo_cost_analysis_wrapper",
         "@org_xprof//xprof/utils:hlo_module_map",
         "@org_xprof//xprof/utils:op_metrics_db_utils",
@@ -714,6 +912,7 @@ cc_library(
     srcs = ["op_stats_to_roofline_model.cc"],
     hdrs = ["op_stats_to_roofline_model.h"],
     deps = [
+        ":data_table_utils",
         ":op_metrics_db_combiner",
         ":op_metrics_to_record",
         ":source_info_utils",
@@ -725,7 +924,6 @@ cc_library(
         "@org_xprof//plugin/xprof/protobuf:roofline_model_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:source_info_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:steps_db_proto_cc",
-        "@org_xprof//xprof/convert:data_table_utils",
         "@org_xprof//xprof/utils:diagnostics",
         "@org_xprof//xprof/utils:roofline_model_utils",
         "@tsl//tsl/platform:protobuf",
@@ -758,6 +956,7 @@ cc_library(
     hdrs = ["op_stats_to_overview_page.h"],
     deps = [
         ":data_table_utils",
+        ":op_metrics_db_combiner",
         ":op_metrics_to_record",
         ":op_stats_to_input_pipeline_analysis",
         "@com_google_absl//absl/algorithm:container",
@@ -781,9 +980,21 @@ cc_library(
         "@org_xprof//xprof/utils:op_metrics_db_utils",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/platform:types",
+        "@xla//xla/tsl/profiler/convert:xla_op_utils",
         "@xla//xla/tsl/profiler/utils:format_utils",
         "@xla//xla/tsl/profiler/utils:math_utils",
         "@xla//xla/tsl/profiler/utils:tf_op_utils",
+    ],
+)
+
+cc_test(
+    name = "op_stats_to_overview_page_test",
+    srcs = ["op_stats_to_overview_page_test.cc"],
+    deps = [
+        ":op_stats_to_overview_page",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:overview_page_proto_cc",
     ],
 )
 
@@ -858,7 +1069,11 @@ cc_test(
 cc_test(
     name = "xplane_to_trace_container_test",
     srcs = ["xplane_to_trace_container_test.cc"],
+    data = [
+        "@org_xprof//xprof/convert/test_xplanes:gpu_training_2.xplane.pb",
+    ],
     deps = [
+        ":file_utils",
         ":xplane_to_trace_container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
@@ -866,6 +1081,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "@org_xprof//xprof/utils:tensorflow_utils",
         "@xla//xla/tsl/profiler/utils:math_utils",
+        "@xla//xla/tsl/profiler/utils:trace_utils",
         "@xla//xla/tsl/profiler/utils:xplane_schema",
     ],
 )
@@ -1016,10 +1232,12 @@ cc_library(
     deps = [
         ":duty_cycle_combiner",
         ":duty_cycle_tracker",
+        ":flat_op_metrics_db_combiner",
         ":model_tracker",
         ":op_metrics_db_combiner",
         ":op_stats_to_input_pipeline_analysis",
         ":step_events_to_steps_db",
+        ":xplane_to_flat_op_metrics_db",
         ":xplane_to_kernel_stats_db",
         ":xplane_to_op_metrics_db",
         ":xplane_to_step_events",
@@ -1034,6 +1252,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@org_xprof//plugin/xprof/protobuf:diagnostics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:hardware_types_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
@@ -1041,6 +1260,7 @@ cc_library(
         "@org_xprof//plugin/xprof/protobuf:tf_function_proto_cc",
         "@org_xprof//xprof/utils:device_caps_utils",
         "@org_xprof//xprof/utils:event_span",
+        "@org_xprof//xprof/utils:flat_op_metrics_db_utils",
         "@org_xprof//xprof/utils:gpu_event_stats",
         "@org_xprof//xprof/utils:hardware_type_utils",
         "@org_xprof//xprof/utils:hlo_cost_analysis_wrapper",
@@ -1050,6 +1270,7 @@ cc_library(
         "@org_xprof//xprof/utils:op_utils",
         "@org_xprof//xprof/utils:xprof_gpu_cost_analysis_types",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/hlo/ir:hlo",
         "@xla//xla/tsl/profiler/convert:xla_op_utils",
         "@xla//xla/tsl/profiler/utils:math_utils",
         "@xla//xla/tsl/profiler/utils:tf_xplane_visitor",
@@ -1071,6 +1292,7 @@ cc_library(
         ":op_stats_combiner",
         ":preprocess_single_host_xplane",
         ":repository",
+        ":unified_session_snapshot",
         ":xplane_to_op_stats",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
@@ -1079,10 +1301,10 @@ cc_library(
         "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
         "@org_xprof//xprof/utils:hardware_type_utils",
         "@org_xprof//xprof/utils:step_intersection",
+        "@tsl//tsl/platform:path",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
-        "@xla//xla/tsl/platform:types",
     ],
 )
 
@@ -1111,9 +1333,11 @@ cc_test(
         "@org_xprof//xprof/utils:hlo_proto_map",
         "@org_xprof//xprof/utils:op_metrics_db_utils",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/hlo/ir:hlo",
         "@xla//xla/tsl/platform:status",
         "@xla//xla/tsl/platform:types",
         "@xla//xla/tsl/profiler/convert:xla_op_utils",
+        "@xla//xla/tsl/profiler/utils:math_utils",
         "@xla//xla/tsl/profiler/utils:tf_xplane_visitor",
         "@xla//xla/tsl/profiler/utils:xplane_builder",
         "@xla//xla/tsl/profiler/utils:xplane_schema",
@@ -1178,11 +1402,11 @@ cc_library(
     srcs = ["xplane_to_kernel_stats_db.cc"],
     hdrs = ["xplane_to_kernel_stats_db.h"],
     deps = [
+        ":data_table_utils",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@org_xprof//plugin/xprof/protobuf:kernel_stats_proto_cc",
-        "@org_xprof//xprof/convert:data_table_utils",
         "@org_xprof//xprof/utils:gpu_event_stats",
         "@org_xprof//xprof/utils:kernel_stats_utils",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
@@ -1303,6 +1527,7 @@ cc_library(
     srcs = ["op_stats_combiner.cc"],
     hdrs = ["op_stats_combiner.h"],
     deps = [
+        ":flat_op_metrics_db_combiner",
         ":op_metrics_db_combiner",
         ":xplane_to_tf_functions",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -1350,6 +1575,8 @@ cc_library(
     deps = [
         "@com_google_absl//absl/strings",
         "@org_xprof//xprof/utils:derived_timeline",
+        "@org_xprof//xprof/utils:xplane_hlo_fixer",
+        "@tsl//tsl/platform:fingerprint",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/profiler/utils:group_events",
         "@xla//xla/tsl/profiler/utils:preprocess_xplane",
@@ -1401,6 +1628,7 @@ cc_library(
         ":profile_processor_factory",
         ":repository",
         ":tool_options",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
@@ -1447,12 +1675,13 @@ cc_library(
         ":smart_suggestion_processor",
         ":streaming_trace_viewer_processor",
         ":tool_options",
+        ":trace_view_options",
         ":trace_viewer_processor",
+        ":unified_session_snapshot",
         ":xplane_to_dcn_collective_stats",
         ":xplane_to_hlo",
         ":xplane_to_memory_profile",
         ":xplane_to_perf_counters",
-        ":xplane_to_tf_data_stats",
         ":xplane_to_tool_names",
         ":xplane_to_trace_container",
         ":xplane_to_utilization_viewer",
@@ -1461,6 +1690,8 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
+        "@com_google_protobuf//:json",
+        "@com_google_protobuf//:protobuf",
         "@org_xprof//plugin/xprof/protobuf:dcn_slack_analysis_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:hardware_types_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:inference_stats_proto_cc",
@@ -1472,15 +1703,9 @@ cc_library(
         "@org_xprof//plugin/xprof/protobuf:roofline_model_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:tf_data_stats_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:tf_stats_proto_cc",
-        "@org_xprof//xprof/convert/smart_suggestion:all_rules",
-        "@org_xprof//xprof/convert/smart_suggestion:signal_provider",
-        "@org_xprof//xprof/convert/smart_suggestion:smart_suggestion_engine",
-        "@org_xprof//xprof/convert/smart_suggestion:smart_suggestion_rule_factory",
-        "@org_xprof//xprof/convert/smart_suggestion:tool_data_provider_impl",
         "@org_xprof//xprof/convert/trace_viewer:trace_events",
         "@org_xprof//xprof/convert/trace_viewer:trace_events_to_json",
         "@org_xprof//xprof/convert/trace_viewer:trace_options",
-        "@org_xprof//xprof/convert/trace_viewer:trace_viewer_visibility",
         "@org_xprof//xprof/utils:hardware_type_utils",
         "@tsl//tsl/platform:path",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
@@ -1489,9 +1714,24 @@ cc_library(
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
         "@xla//xla/tsl/profiler/convert:xplane_to_trace_events",
-        "@xla//xla/tsl/profiler/utils:timespan",
+    ],
+)
+
+cc_test(
+    name = "xplane_to_tools_data_test",
+    srcs = ["xplane_to_tools_data_test.cc"],
+    deps = [
+        ":file_utils",
+        ":repository",
+        ":tool_options",
+        ":xplane_to_tools_data",
+        "//file/base",
+        "//file/base:options_cc",
+        "//file/base:path",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/profiler/utils:xplane_schema",
-        "@xla//xla/tsl/profiler/utils:xplane_utils",
     ],
 )
 
@@ -1504,7 +1744,12 @@ cc_library(
         ":profile_processor_factory",
         ":repository",
         ":tool_options",
+        ":unified_hlo_stats_processor",
+        ":unified_op_profile_processor",
+        ":unified_profile_processor",
+        ":unified_profile_processor_factory",
         "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1620,6 +1865,8 @@ cc_test(
     srcs = ["hlo_proto_to_memory_visualization_utils_test.cc"],
     deps = [
         ":hlo_proto_to_memory_visualization_utils",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
@@ -1638,6 +1885,7 @@ cc_library(
         ":file_utils",
         ":repository",
         ":tool_options",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
@@ -1648,6 +1896,27 @@ cc_library(
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
         "@xla//xla/tsl/profiler/utils:file_system_utils",
+    ],
+)
+
+cc_test(
+    name = "xplane_to_hlo_test",
+    srcs = ["xplane_to_hlo_test.cc"],
+    deps = [
+        ":file_utils",
+        ":repository",
+        ":tool_options",
+        ":xplane_to_hlo",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:path",
+        "@xla//xla/service:hlo_proto_cc",
+        "@xla//xla/tsl/platform:env",
     ],
 )
 
@@ -1663,13 +1932,36 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:op_profile_proto_cc",
         "@org_xprof//plugin/xprof/protobuf:source_info_proto_cc",
+        "@org_xprof//xprof/utils:flat_op_metrics_db_utils",
         "@org_xprof//xprof/utils:op_metrics_db_utils",
         "@org_xprof//xprof/utils:xla_op_utils",
         "@tsl//tsl/platform:protobuf",
         "@xla//xla/tsl/profiler/convert:xla_op_utils",
+        "@xla//xla/tsl/profiler/utils:math_utils",
+    ],
+)
+
+cc_library(
+    name = "flat_op_stats_to_op_profile",
+    srcs = ["flat_op_stats_to_op_profile.cc"],
+    hdrs = ["flat_op_stats_to_op_profile.h"],
+    deps = [
+        ":op_profile_builder",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:hardware_types_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_profile_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@org_xprof//xprof/utils:flat_op_metrics_db_utils",
+        "@org_xprof//xprof/utils:op_metrics_db_utils",
         "@xla//xla/tsl/profiler/utils:math_utils",
     ],
 )
@@ -1697,6 +1989,23 @@ cc_library(
         "@xla//xla/tsl/platform:statusor",
         "@org_xprof//xprof/utils:hlo_module_utils",
         "@org_xprof//xprof/utils:hlo_proto_to_module",
+    ],
+)
+
+cc_test(
+    name = "flat_op_stats_to_op_profile_test",
+    srcs = ["flat_op_stats_to_op_profile_test.cc"],
+    deps = [
+        ":flat_op_stats_to_op_profile",
+        ":op_profile_builder",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:hardware_types_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_profile_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
     ],
 )
 
@@ -1742,21 +2051,92 @@ cc_library(
 )
 
 cc_library(
-    name = "file_utils",
-    srcs = ["file_utils.cc"],
-    hdrs = ["file_utils.h"],
+    name = "trace_view_options",
+    srcs = ["trace_view_options.cc"],
+    hdrs = ["trace_view_options.h"],
     deps = [
-        "@com_github_googlecloudplatform_google_cloud_cpp//google/cloud:google_cloud_cpp_common",
-        "@com_github_googlecloudplatform_google_cloud_cpp//google/cloud/storage:google_cloud_cpp_storage",
+        ":tool_options",
+        ":xplane_to_trace_container",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@org_xprof//xprof/convert/trace_viewer:trace_events_filter_interface",
+        "@org_xprof//xprof/convert/trace_viewer:trace_options",
+        "@org_xprof//xprof/convert/trace_viewer:trace_viewer_visibility",
+        "@xla//xla/tsl/platform:env",
+        "@xla//xla/tsl/platform:errors",
+        "@xla//xla/tsl/profiler/utils:timespan",
+    ],
+)
+
+cc_test(
+    name = "trace_view_options_test",
+    srcs = ["trace_view_options_test.cc"],
+    deps = [
+        ":tool_options",
+        ":trace_view_options",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "storage_client_interface",
+    hdrs = ["storage_client_interface.h"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "file_utils",
+    srcs = [
+        "file_utils.cc",
+    ],
+    hdrs = [
+        "file_utils.h",
+    ],
+    deps = [
+        ":file_utils_gcs",
+        ":storage_client_interface",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@tsl//tsl/platform:protobuf",
         "@xla//xla/tsl/platform:env",
         "@xla//xla/tsl/platform:errors",
+        "@xla//xla/tsl/platform:statusor",
     ],
+)
+
+cc_library(
+    name = "file_utils_gcs",
+    srcs = ["file_utils_gcs.cc"],
+    hdrs = ["file_utils_gcs.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":storage_client_interface",
+        "@com_github_googlecloudplatform_google_cloud_cpp//:common",
+        "@com_github_googlecloudplatform_google_cloud_cpp//:storage",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@tsl//tsl/platform:protobuf",
+        "@xla//xla/tsl/platform:env",
+        "@xla//xla/tsl/platform:errors",
+        "@xla//xla/tsl/platform:statusor",
+    ],
+    alwayslink = 1,
 )
 
 cc_test(
@@ -1764,10 +2144,11 @@ cc_test(
     srcs = ["file_utils_test.cc"],
     deps = [
         ":file_utils",
-        "@com_github_googlecloudplatform_google_cloud_cpp//google/cloud:google_cloud_cpp_common",
-        "@com_github_googlecloudplatform_google_cloud_cpp//google/cloud/storage:google_cloud_cpp_storage",
-        "@com_github_googlecloudplatform_google_cloud_cpp//google/cloud/storage:google_cloud_cpp_storage_testing",
+        ":file_utils_gcs",
+        ":storage_client_interface",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/lib/core:status_test_util",
@@ -1780,18 +2161,27 @@ cc_library(
     hdrs = ["repository.h"],
     deps = [
         ":file_utils",
+        ":unified_session_snapshot",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
+        "@org_xprof//xprof/utils:hlo_cost_analysis_wrapper",
         "@org_xprof//xprof/utils:hlo_module_map",
+        "@org_xprof//xprof/utils:xplane_hlo_fixer",
+        "@riegeli//riegeli/bytes:string_reader",
+        "@riegeli//riegeli/records:record_reader",
+        "@riegeli//riegeli/records:skipped_region",
         "@tsl//tsl/platform:path",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/platform:env",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
         "@xla//xla/tsl/profiler/utils:file_system_utils",
+        "@xla//xla/tsl/profiler/utils:xplane_utils",
     ],
 )
 
@@ -1805,6 +2195,8 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "@com_google_protobuf//:protobuf",
         "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@riegeli//riegeli/bytes:string_writer",
+        "@riegeli//riegeli/records:record_writer",
         "@tsl//tsl/platform:path",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/platform:env",
@@ -1857,6 +2249,7 @@ cc_library(
     srcs = ["xplane_to_trace_container.cc"],
     hdrs = ["xplane_to_trace_container.h"],
     deps = [
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
         "@org_xprof//plugin/xprof/protobuf:trace_events_proto_cc",
@@ -1864,7 +2257,6 @@ cc_library(
         "@org_xprof//xprof/convert/trace_viewer:trace_event_arguments_builder",
         "@org_xprof//xprof/convert/trace_viewer:trace_events",
         "@org_xprof//xprof/convert/trace_viewer:trace_events_util",
-        "@org_xprof//xprof/convert/trace_viewer:trace_utils",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/profiler/utils:tf_xplane_visitor",
         "@xla//xla/tsl/profiler/utils:timespan",
@@ -2335,7 +2727,7 @@ cc_library(
     name = "url_utils",
     srcs = [tf_profiler_alias("@org_xprof//xprof/convert/", "url_utils.cc")],
     hdrs = ["url_utils.h"],
-    visibility = ["@xla//xla/tsl/profiler:friends"],
+    visibility = ["//visibility:private"],
     deps = [
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
@@ -2352,8 +2744,10 @@ cc_library(
         ":xplane_to_step_events",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf",
         "@org_xprof//plugin/xprof/protobuf:event_time_fraction_analyzer_proto_cc",
         "@org_xprof//xprof/utils:event_span",
@@ -2379,41 +2773,19 @@ cc_library(
         ":xspace_to_event_time_fraction_analyzer",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
         "@org_xprof//plugin/xprof/protobuf:event_time_fraction_analyzer_proto_cc",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
-        "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
     ],
     alwayslink = 1,
-)
-
-cc_library(
-    name = "multi_xspace_to_event_time_fraction_analyzer",
-    srcs = ["multi_xspace_to_event_time_fraction_analyzer.cc"],
-    hdrs = ["xspace_to_event_time_fraction_analyzer.h"],
-    deps = [
-        ":event_time_fraction_analyzer_processor",
-        ":repository",
-        ":tool_options",
-        ":xplane_to_tools_data_with_profile_processor",
-        ":xspace_to_event_time_fraction_analyzer",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@org_xprof//plugin/xprof/protobuf:event_time_fraction_analyzer_proto_cc",
-        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
-        "@xla//xla/tsl/platform:errors",
-        "@xla//xla/tsl/platform:statusor",
-    ],
 )
 
 cc_test(
     name = "xspace_to_event_time_fraction_analyzer_test",
     srcs = ["xspace_to_event_time_fraction_analyzer_test.cc"],
     deps = [
-        ":multi_xspace_to_event_time_fraction_analyzer",
         ":repository",
         ":xspace_to_event_time_fraction_analyzer",
         "@com_google_absl//absl/status:statusor",
@@ -2444,8 +2816,10 @@ cc_library(
     deps = [
         ":data_table_utils",
         ":tpu_counter_util",
-        ":tpuv7generic_utilization_utils",
+        ":tpu_generic_utilization_utils",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/functional:overload",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
@@ -2461,11 +2835,83 @@ cc_test(
     deps = [
         ":xplane_to_utilization_viewer",
         "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
+        "@org_xprof//xprof/utils:tpu_counter_ids_v6e",
         "@org_xprof//xprof/utils:tpu_counter_ids_v7x",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
         "@xla//xla/tsl/profiler/utils:xplane_builder",
         "@xla//xla/tsl/profiler/utils:xplane_schema",
     ],
+)
+
+cc_library(
+    name = "flat_op_metrics_db_combiner",
+    srcs = ["flat_op_metrics_db_combiner.cc"],
+    hdrs = ["flat_op_metrics_db_combiner.h"],
+    deps = [
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@org_xprof//plugin/xprof/protobuf:op_stats_proto_cc",
+        "@org_xprof//xprof/utils:flat_op_metrics_db_utils",
+        "@tsl//tsl/platform:protobuf",
+        "@xla//xla/tsl/platform:logging",
+    ],
+)
+
+cc_test(
+    name = "flat_op_metrics_db_combiner_test",
+    srcs = ["flat_op_metrics_db_combiner_test.cc"],
+    deps = [
+        ":flat_op_metrics_db_combiner",
+        "//net/proto2/contrib/parse_proto:parse_text_proto",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+    ],
+)
+
+cc_library(
+    name = "xplane_to_flat_op_metrics_db",
+    srcs = ["xplane_to_flat_op_metrics_db.cc"],
+    hdrs = ["xplane_to_flat_op_metrics_db.h"],
+    deps = [
+        ":flat_op_metrics_db_combiner",
+        "@com_google_absl//absl/container:btree",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@org_xprof//xprof/utils:flat_op_metrics_db_utils",
+        "@org_xprof//xprof/utils:op_metrics_db_utils",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/profiler/utils:tf_xplane_visitor",
+        "@xla//xla/tsl/profiler/utils:timespan",
+        "@xla//xla/tsl/profiler/utils:xplane_schema",
+        "@xla//xla/tsl/profiler/utils:xplane_utils",
+        "@xla//xla/tsl/profiler/utils:xplane_visitor",
+    ],
+)
+
+cc_test(
+    name = "xplane_to_flat_op_metrics_db_test",
+    srcs = ["xplane_to_flat_op_metrics_db_test.cc"],
+    deps = [
+        ":xplane_to_flat_op_metrics_db",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+        "@org_xprof//plugin/xprof/protobuf:flat_op_metrics_proto_cc",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+        "@xla//xla/tsl/profiler/utils:xplane_builder",
+        "@xla//xla/tsl/profiler/utils:xplane_schema",
+    ],
+)
+
+cc_library(
+    name = "unified_op_profile_processor_registration",
+    srcs = ["unified_op_profile_processor_registration.cc"],
+    deps = [
+        ":unified_op_profile_processor",
+        ":unified_profile_processor_factory",
+    ],
+    alwayslink = 1,
 )

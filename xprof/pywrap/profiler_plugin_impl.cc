@@ -61,7 +61,6 @@ static const absl::NoDestructor<absl::flat_hash_set<std::string>>
         "trace_viewer",
         "trace_viewer@",
         "op_profile",
-        "smart_suggestion",
     });
 
 namespace xprof {
@@ -171,8 +170,9 @@ absl::Status GetSnapshot(const char* service_addr, const char* logdir) {
 static absl::once_flag server_init_flag;
 
 void StartGrpcServer(int port, int max_concurrent_requests) {
-  absl::call_once(server_init_flag, ::xprof::profiler::InitializeGrpcServer,
-                  port, max_concurrent_requests);
+  absl::call_once(server_init_flag, [port, max_concurrent_requests]() {
+    ::xprof::profiler::InitializeGrpcServer(port, max_concurrent_requests);
+  });
 }
 
 absl::StatusOr<std::pair<std::string, bool>> XSpaceToToolsData(

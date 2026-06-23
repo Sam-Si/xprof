@@ -1,7 +1,6 @@
 #include "xprof/convert/megascale_perfetto/trace_processor.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -11,19 +10,35 @@
 #include <variant>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/log.h"
 #include "absl/strings/match.h"
-#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/strip.h"
 #include "re2/re2.h"
 #include "xla/tsl/lib/gtl/map_util.h"
 #include "xprof/convert/megascale_perfetto/xprof_trace.h"
 
 namespace xprof::megascale {
 namespace {
+
+static constexpr LazyRE2 kSendRe = {R"re(send\.?(\d+)?)re"};
+static constexpr LazyRE2 kRecvRe = {R"re(recv\.?(\d+)?)re"};
+static constexpr LazyRE2 kSendDoneRe = {R"re(send-done\.?(\d+)?)re"};
+static constexpr LazyRE2 kRecvDoneRe = {R"re(recv-done\.?(\d+)?)re"};
+static constexpr LazyRE2 kGraphNameRe = {
+    R"re(device_(\d+)_gid_([a-zA-Z0-9_\.-]+_\d+))re"};
+
+bool IsExemptFromTinyEventGrouping(absl::string_view name) {
+  if (!absl::StartsWith(name, "send") && !absl::StartsWith(name, "recv")) {
+    return false;
+  }
+  return RE2::FullMatch(name, *kSendRe) || RE2::FullMatch(name, *kRecvRe) ||
+         RE2::FullMatch(name, *kSendDoneRe) ||
+         RE2::FullMatch(name, *kRecvDoneRe);
+}
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -102,29 +117,26 @@ absl::string_view ExtractRendezvousFromGraphKey(const Event& event,
   if (!FindArgString(event, trace, "graph_key", &graph_key)) {
     return "";
   }
-  static constexpr LazyRE2 kGraphKeyRendezvousRe = {
-      R"(device_\d+_gid_([^$]+)\$.*)"};
   absl::string_view rendezvous_name;
-  if (RE2::FullMatch(graph_key, *kGraphKeyRendezvousRe, &rendezvous_name)) {
+  if (RE2::PartialMatch(graph_key, *kGraphNameRe, nullptr, &rendezvous_name)) {
     return rendezvous_name;
   }
   return "";
 }
 
 int64_t ExtractHloId(absl::string_view hlo_name) {
-  static constexpr LazyRE2 kHloId = {R"re([a-zA-Z_-]+\.(\d+))re"};
+  static constexpr LazyRE2 kHloId = {R"re([a-zA-Z-]+\.(\d+))re"};
   int64_t id;
   if (RE2::FullMatch(hlo_name, *kHloId, &id)) {
     return id;
   }
-  return -1;
+  return 0;
 }
 
 void RenameTrack(Track& track) {
   uint64_t device_id;
   absl::string_view name_part;
-  if (RE2::FullMatch(track.name, "device_(\\d+)_gid_(.*)", &device_id,
-                     &name_part)) {
+  if (RE2::FullMatch(track.name, *kGraphNameRe, &device_id, &name_part)) {
     track.name = absl::StrCat(name_part, " (", device_id, ")");
   } else if (track.name == "Steps") {
     track.name = "1. Steps";
@@ -170,12 +182,23 @@ class FlowQueueMap {
 // TraceProcessor Implementation
 // -----------------------------------------------------------------------------
 
+TraceProcessor::TraceProcessor(XprofTrace* absl_nonnull trace,
+                               bool group_tiny_events)
+    : trace_(*trace),
+      group_tiny_events_(group_tiny_events),
+      description_key_(trace_.string_table.Intern("description")),
+      description_val_(trace_.string_table.Intern(
+          "If you would like to see them, please add "
+          "&group_tiny_events=false to the URL.")),
+      hidden_events_key_(trace_.string_table.Intern("hidden_events")) {}
+
 void TraceProcessor::Process() {
   SortEvents();
   AssignRunIds();
+  MaybeGroupTinyEvents();
   MarkLastDmaEvents();
   ResolveFlows();
-  AddNetworkCounters();
+  AddGlobalCounters();
   ModifyTrackNames();
 }
 
@@ -257,12 +280,11 @@ void TraceProcessor::AssignRunIds() {
 }
 
 void TraceProcessor::MarkLastDmaEvents() {
-  static constexpr LazyRE2 kExecutionEventRe = {R"(device_\d+_gid_.*)"};
   for (auto& [tpu_id, tracks] : trace_.megascale_fragments) {
     for (auto& track : tracks) {
       std::vector<size_t> execution_event_indices;
       for (size_t i = 0; i < track.events.size(); ++i) {
-        if (RE2::FullMatch(track.events[i].name, *kExecutionEventRe)) {
+        if (RE2::FullMatch(track.events[i].name, *kGraphNameRe)) {
           execution_event_indices.push_back(i);
         }
       }
@@ -300,6 +322,7 @@ void TraceProcessor::MarkLastDmaEvents() {
 }
 
 void TraceProcessor::ResolveFlows() {
+  int64_t next_flow_id = 1;
   // map key: tpu_id, run_id, hlo_id
   absl::flat_hash_map<std::string, absl::string_view> send_hlo_to_rendezvous;
   absl::flat_hash_map<std::string, absl::string_view> recv_hlo_to_rendezvous;
@@ -323,7 +346,7 @@ void TraceProcessor::ResolveFlows() {
 
   auto push_flow = [&](FlowQueueMap& queue, const std::string& key,
                        Event& producer) {
-    int64_t fid = next_flow_id_++;
+    int64_t fid = next_flow_id++;
     producer.flows.push_back({fid, FlowDirection::kSource});
     producer.args.push_back({trace_.string_table.Intern("flow_out"), fid});
     queue.Push(key, fid);
@@ -374,34 +397,36 @@ void TraceProcessor::ResolveFlows() {
   // Pass 1: Producers
   // ---------------------------------------------------------------------------
   // TPU Events: 'send' and 'recv'.
+  int recv_done_counter = 0;
   visit_tpu_ops([&](int64_t tpu_id, Track& track, Event& event) {
+    if (!absl::StartsWith(event.name, "send") &&
+        !absl::StartsWith(event.name, "recv")) {
+      return;
+    }
     bool is_send;
-    if (absl::StartsWith(event.name, "send.")) {
+    if (RE2::FullMatch(event.name, *kSendRe)) {
       is_send = true;
-    } else if (absl::StartsWith(event.name, "recv.")) {
+    } else if (RE2::FullMatch(event.name, *kRecvRe)) {
       is_send = false;
     } else {
+      if (RE2::FullMatch(event.name, *kRecvDoneRe)) ++recv_done_counter;
       return;  // Skip other events.
     }
 
-    int64_t hlo_id = ExtractHloId(event.name);
-    if (hlo_id == -1) {
-      return;
-    }
     absl::string_view rendezvous = ExtractRendezvousFromLongName(event, trace_);
     if (rendezvous.empty()) {
       return;
     }
     std::string key = make_key(tpu_id, event.run_id, rendezvous);
-    std::string hlo_key = make_hlo_key(tpu_id, event.run_id, hlo_id);
+    int64_t hlo_id = ExtractHloId(event.name);
 
     if (is_send) {
+      std::string hlo_key = make_hlo_key(tpu_id, event.run_id, hlo_id);
       send_hlo_to_rendezvous[hlo_key] = rendezvous;
       push_flow(q_send_to_send_done, key, event);
       push_flow(q_send_to_recv_done, key, event);
       push_flow(q_send_to_d2h, key, event);
     } else {
-      recv_hlo_to_rendezvous[hlo_key] = rendezvous;
       push_flow(q_recv_to_recv_done, key, event);
       push_flow(q_recv_to_h2d, key, event);
     }
@@ -453,16 +478,14 @@ void TraceProcessor::ResolveFlows() {
           is_last != 1) {
         return;
       }
-      if (!is_d2h) {
+      if (is_d2h) {
+        push_flow(q_d2h_to_send_done, key, event);
+      } else {
         // Reduce last H2D END duration slightly. This is needed because
         // Perfetto will show the flow going out of the parent slice (megascale
         // graph event) if this is the last event in the action graph and its
         // end time matches the end time of the parent slice.
         event.duration_ps = std::max(event.duration_ps - 1000, int64_t{0});
-      }
-      if (is_d2h) {
-        push_flow(q_d2h_to_send_done, key, event);
-      } else {
         push_flow(q_h2d_to_recv_done, key, event);
       }
     }
@@ -471,20 +494,26 @@ void TraceProcessor::ResolveFlows() {
   // ---------------------------------------------------------------------------
   // Pass 2: Consumers (send-done, recv-done)
   // ---------------------------------------------------------------------------
+  // This pass may add a new instant event (recv-done END) for each recv-done.
+  // We buffer these new events in this vector such that we can add them to
+  // their respective tracks after we finish iterating through all tracks.
+  std::vector<std::pair<Track*, Event>> pending_events;
+  pending_events.reserve(recv_done_counter);
   visit_tpu_ops([&](int64_t tpu_id, Track& track, Event& event) {
+    if (!absl::StartsWith(event.name, "send") &&
+        !absl::StartsWith(event.name, "recv")) {
+      return;
+    }
     bool is_send_done;
-    if (absl::StartsWith(event.name, "send-done.")) {
+    if (RE2::FullMatch(event.name, *kSendDoneRe)) {
       is_send_done = true;
-    } else if (absl::StartsWith(event.name, "recv-done.")) {
+    } else if (RE2::FullMatch(event.name, *kRecvDoneRe)) {
       is_send_done = false;
     } else {
       return;  // Skip other events.
     }
 
     int64_t hlo_id = ExtractHloId(event.name);
-    if (hlo_id == -1) {
-      return;
-    }
     std::string hlo_key = make_hlo_key(tpu_id, event.run_id, hlo_id);
     absl::string_view rendezvous =
         is_send_done
@@ -515,7 +544,7 @@ void TraceProcessor::ResolveFlows() {
       instant_event.args.push_back(
           {trace_.string_table.Intern("run_id"), event.run_id});
       // Add a flow from the recv-done to the recv-done END.
-      int64_t fid_internal = next_flow_id_++;
+      int64_t fid_internal = next_flow_id++;
       event.args.push_back(
           {trace_.string_table.Intern("flow_out"), fid_internal});
       event.flows.push_back({fid_internal, FlowDirection::kSource});
@@ -525,12 +554,18 @@ void TraceProcessor::ResolveFlows() {
 
       pop_flow(q_h2d_to_recv_done, key, instant_event);
 
-      track.events.push_back(std::move(instant_event));
+      pending_events.push_back({&track, std::move(instant_event)});
     }
   });
+
+  for (auto& [track_ptr, event] : pending_events) {
+    track_ptr->events.push_back(std::move(event));
+  }
 }
 
-void TraceProcessor::AddNetworkCounters() {
+void TraceProcessor::AddGlobalCounters() {
+  static constexpr LazyRE2 kBufferSizeRe = {
+      R"re(s(\d+)->(\d+)d\|\$c\d+=(\d+))re"};
   // Filter out unreasonable spikes which likely come from bad duration data.
   // We don't expect to see a very large jump in bandwidth usage between two
   // consecutive data points.
@@ -540,11 +575,25 @@ void TraceProcessor::AddNetworkCounters() {
   std::vector<std::pair<int64_t, int64_t>> tx_deltas;
   std::vector<std::pair<int64_t, double>> rx_bw_deltas;
   std::vector<std::pair<int64_t, double>> tx_bw_deltas;
+  std::vector<std::pair<int64_t, int64_t>> inflight_collective_count_deltas;
+  std::vector<std::pair<int64_t, int64_t>> inflight_collective_bytes_deltas;
 
   for (auto& [tpu_id, tracks] : trace_.megascale_fragments) {
     for (const auto& track : tracks) {
       for (const auto& event : track.events) {
-        if (event.name == "NetworkReceive END") {
+        if (RE2::FullMatch(event.name, *kGraphNameRe)) {
+          int64_t end_time_ps = event.timestamp_ps + event.duration_ps;
+          inflight_collective_count_deltas.push_back({event.timestamp_ps, 1});
+          inflight_collective_count_deltas.push_back({end_time_ps, -1});
+
+          int64_t input_size = 0;
+          if (FindArgInt(event, trace_, "input_size", &input_size)) {
+            inflight_collective_bytes_deltas.push_back(
+                {event.timestamp_ps, input_size});
+            inflight_collective_bytes_deltas.push_back(
+                {end_time_ps, -input_size});
+          }
+        } else if (event.name == "NetworkReceive END") {
           int64_t latency_us = 0;
           uint64_t latency_uint = 0;
           if (FindArgUint(event, trace_, "network_transport_latency_us",
@@ -561,11 +610,15 @@ void TraceProcessor::AddNetworkCounters() {
             continue;
           }
 
-          static constexpr LazyRE2 kBufferSizeRe = {R"(\$c\d+=(\d+))"};
           absl::string_view input(buffer_sizes);
-          int64_t bytes;
+          int64_t src, dst, bytes;
           int chunks = 0;
-          while (RE2::FindAndConsume(&input, *kBufferSizeRe, &bytes)) {
+          while (
+              RE2::FindAndConsume(&input, *kBufferSizeRe, &src, &dst, &bytes)) {
+            // Ignore loopback transfers.
+            if (src == dst) {
+              continue;
+            }
             chunks++;
             int64_t end_time_ps = event.timestamp_ps + event.duration_ps;
             int64_t start_time_ps = end_time_ps - (latency_us * 1000000);
@@ -610,11 +663,8 @@ void TraceProcessor::AddNetworkCounters() {
             continue;
           }
 
-          static constexpr LazyRE2 kBufferSizeRe = {
-              R"(s(\w+)->(\w+)d.*?\$c\d+=(\d+))"};
           absl::string_view input(buffer_sizes);
-          std::string src, dst;
-          int64_t bytes;
+          int64_t src, dst, bytes;
           int chunks = 0;
           while (
               RE2::FindAndConsume(&input, *kBufferSizeRe, &src, &dst, &bytes)) {
@@ -672,6 +722,12 @@ void TraceProcessor::AddNetworkCounters() {
   process_deltas(tx_deltas, trace_.tx_counter, "Outstanding Bytes TX");
   process_deltas(rx_bw_deltas, trace_.rx_bw_counter, "Bandwidth RX (Gbps)");
   process_deltas(tx_bw_deltas, trace_.tx_bw_counter, "Bandwidth TX (Gbps)");
+
+  process_deltas(inflight_collective_count_deltas,
+                 trace_.inflight_collective_count, "Inflight Collectives");
+  process_deltas(inflight_collective_bytes_deltas,
+                 trace_.inflight_collective_bytes,
+                 "Inflight Collective Payload");
 }
 
 void TraceProcessor::ModifyTrackNames() {
@@ -683,6 +739,104 @@ void TraceProcessor::ModifyTrackNames() {
   for (auto& [tpu_id, tracks] : trace_.megascale_fragments) {
     for (auto& track : tracks) {
       RenameTrack(track);
+    }
+  }
+}
+
+void TraceProcessor::MaybeGroupTinyEvents() {
+  if (!group_tiny_events_) return;
+  for (auto& [tpu_id, tracks] : trace_.tpu_fragments) {
+    for (Track& track : tracks) {
+      if (!absl::StrContains(track.name, "XLA Ops") &&
+          !absl::StrContains(track.name, "XLA TraceMe")) {
+        continue;
+      }
+
+      size_t read_idx = 0;
+      size_t write_idx = 0;
+
+      while (read_idx < track.events.size()) {
+        const Event& start_event = track.events[read_idx];
+        const bool is_exempt = IsExemptFromTinyEventGrouping(start_event.name);
+        const bool is_tiny = start_event.duration_ps < 1000;
+
+        // Skip non-eligible events.
+        if (!is_tiny || is_exempt) {
+          if (write_idx != read_idx) {
+            track.events[write_idx] = std::move(track.events[read_idx]);
+          }
+          write_idx++;
+          read_idx++;
+          continue;
+        }
+
+        // Group all subsequent tiny events that share the same nanosecond
+        // timestamp.
+        const int64_t truncated_ts = start_event.timestamp_ps / 1000;
+        const int64_t run_id = start_event.run_id;
+
+        size_t j = read_idx + 1;
+        int64_t max_end = start_event.timestamp_ps + start_event.duration_ps;
+        size_t total_name_len = start_event.name.size();
+
+        while (j < track.events.size()) {
+          const Event& curr = track.events[j];
+          const bool curr_exempt = IsExemptFromTinyEventGrouping(curr.name);
+          const bool curr_tiny = curr.duration_ps < 1000;
+
+          // Terminate early on step border transition or exemptions.
+          if (!curr_tiny || curr_exempt ||
+              curr.timestamp_ps / 1000 != truncated_ts ||
+              curr.run_id != run_id) {
+            break;
+          }
+
+          const int64_t curr_end = curr.timestamp_ps + curr.duration_ps;
+          if (curr_end > max_end) {
+            max_end = curr_end;
+          }
+          total_name_len += curr.name.size() + 2;  // +2 for comma + space
+          j++;
+        }
+
+        const size_t count = j - read_idx;
+        if (count >= 2) {
+          Event summary;
+          summary.name = absl::StrCat(count, " events are hidden");
+          // Timestamps are sorted. start_event is earliest.
+          summary.timestamp_ps = start_event.timestamp_ps;
+          summary.duration_ps = max_end - start_event.timestamp_ps;
+          summary.run_id = run_id;
+
+          std::string hidden_events_str;
+          hidden_events_str.reserve(total_name_len);
+          hidden_events_str = start_event.name;
+          for (size_t k = read_idx + 1; k < j; ++k) {
+            absl::StrAppend(&hidden_events_str, ", ", track.events[k].name);
+          }
+
+          summary.args.reserve(2);
+          summary.args.push_back({description_key_, description_val_});
+          summary.args.push_back(
+              {hidden_events_key_,
+               trace_.string_table.Intern(hidden_events_str)});
+
+          track.events[write_idx] = std::move(summary);
+          write_idx++;
+          read_idx = j;
+          continue;
+        }
+
+        if (write_idx != read_idx) {
+          track.events[write_idx] = std::move(track.events[read_idx]);
+        }
+        write_idx++;
+        read_idx++;
+      }
+
+      if (write_idx < track.events.size()) {
+        track.events.resize(write_idx);
+      }
     }
   }
 }

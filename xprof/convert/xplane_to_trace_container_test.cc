@@ -13,8 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xprof/convert/xplane_to_trace_container.h"
-
 #include <cstdint>
 #include <string>
 
@@ -26,7 +24,10 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "xla/tsl/profiler/utils/math_utils.h"
+#include "xla/tsl/profiler/utils/trace_utils.h"
 #include "xla/tsl/profiler/utils/xplane_schema.h"
+#include "xprof/convert/file_utils.h"
+#include "xprof/convert/xplane_to_trace_container.h"
 #include "xprof/utils/tensorflow_utils.h"
 
 namespace tensorflow {
@@ -155,6 +156,57 @@ TEST(XPlaneToTraceContainerTest, AsyncLine) {
   EXPECT_TRUE(async_event_found);
 }
 
+TEST(XPlaneToTraceContainerTest, SubprocessHostTrace_ConvertsToTraceEvents) {
+  XSpace xspace;
+  CHECK_OK(ParseTextFormatFromString(
+      R"pb(
+        planes {
+          name: "/host:CPU [100]"
+          lines {
+            id: 2
+            name: "Thread 2"
+            timestamp_ns: 2000
+            events { metadata_id: 2 offset_ps: 0 duration_ps: 200 }
+          }
+          event_metadata {
+            key: 2
+            value: { id: 2 name: "Event 2" }
+          }
+        }
+        planes {
+          name: "/host:CPU"
+          lines {
+            id: 1
+            name: "Thread 1"
+            timestamp_ns: 1000
+            events { metadata_id: 1 offset_ps: 0 duration_ps: 100 }
+          }
+          event_metadata {
+            key: 1
+            value: { id: 1 name: "Event 1" }
+          }
+        }
+      )pb",
+      &xspace));
+  TraceEventsContainer container;
+  ConvertXSpaceToTraceEventsContainer("localhost", xspace, &container);
+
+  bool event1_found = false;
+  bool event2_found = false;
+  container.ForAllEvents([&](const TraceEvent& event) {
+    if (event.name() == "Event 1") {
+      event1_found = true;
+      EXPECT_EQ(event.device_id(), tsl::profiler::kHostThreadsDeviceId);
+    } else if (event.name() == "Event 2") {
+      event2_found = true;
+      EXPECT_EQ(event.device_id(), tsl::profiler::kHostThreadsDeviceId + 1);
+    }
+  });
+  EXPECT_TRUE(event1_found);
+  EXPECT_TRUE(event2_found);
+}
+
 }  // namespace
+
 }  // namespace profiler
 }  // namespace tensorflow
