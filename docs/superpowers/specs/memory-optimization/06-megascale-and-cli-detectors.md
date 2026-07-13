@@ -195,7 +195,7 @@ detect_layout_mismatch_copies(session)
 | LMC-3 | Share one HLO index / debug_info cache across detector tools | **H** | hypothesized |
 | LMC-4 | Early filter: only copies with layout mismatch / non-optimal minor dim | **M** | hypothesized |
 | LMC-5 | Avoid full op_profile when only enriching metrics for matches | **M** | hypothesized |
-| LMC-6 | OSS implement `_fetch_debug_info` via on-disk protos (lazy) not dump-all | **H** | high (gap) |
+| LMC-6 | OSS implement `_fetch_debug_info` via on-disk protos (lazy) not dump-all | **H** | observed |
 
 **Top:** LMC-1, LMC-2, LMC-3.
 
@@ -340,7 +340,7 @@ get_overview(session)  [@cached 86400s]
 | DET-1 | Shared `SessionHloIndex`: lazy module map, single connectivity build | **Critical** | observed |
 | DET-2 | Detectors must not force full `hlo_op_profile` UI proto — metrics-only extract | **H** | hypothesized |
 | DET-3 | Prefer on-disk `*.hlo_proto.pb` (`generate_hlo_protos`) over opaque `_fetch_debug_info` dump-all | **H** | observed |
-| DET-4 | Never fetch full graph_viewer text for structural graph queries | **Critical** | high (URS) |
+| DET-4 | Never fetch full graph_viewer text for structural graph queries | **Critical** | observed |
 | DET-5 | Single-flight convert when MCP tools fan-out in parallel | **H** | hypothesized |
 | DET-6 | JSON `indent=2` for large inefficient_ops lists | **L** | observed |
 

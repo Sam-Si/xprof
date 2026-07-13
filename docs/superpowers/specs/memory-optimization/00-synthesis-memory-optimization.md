@@ -101,7 +101,7 @@ Full detail: **`01-trace-viewer-path.md`**.
 
 | Rank | Theme | Why it multiplies across tools | Severity | Confidence | Primary docs |
 |------|-------|--------------------------------|----------|------------|--------------|
-| 1 | **Projection modes** (`full` / `ui` / `summary` / `peak_*`) so CLI/KPI never build UI protos | CLI detectors, overview, memory, util, top-HLO all pay full convert | Critical | high (code paths) | 03, 05, 06 |
+| 1 | **Projection modes** (`full` / `ui` / `summary` / `peak_*`) so CLI/KPI never build UI protos | CLI detectors, overview, memory, util, top-HLO all pay full convert | Critical | observed | 03, 05, 06 |
 | 2 | **Concurrent convert cap** (shared semaphore: `/data` + cache worker) | max_workers=1 for cache only; UI tabs unbounded | H | hypothesized | 02 |
 | 3 | **Encoding hygiene** — no double compression; free raw after gzip; identity for precompressed | respond() always gzips; Perfetto + trace pb | H | observed | 01, 02, 06 |
 | 4 | **ALL_HOSTS / multi-host combine without holding all intermediates** | OpStats vector of all hosts; explicit TODOs | H | observed | 02, 04, 05 |
