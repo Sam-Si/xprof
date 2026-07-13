@@ -298,7 +298,7 @@ Phase 0 is mandatory before large L-effort architecture. It produces numbers tha
 |--------|-------|-------|
 | Peak RSS (plugin process) | cgroup / `/proc` / sample | Separate Python vs during C++ convert if possible |
 | Convert wall time | existing LOG(INFO) processors | overview_page_processor already times |
-| Wire bytes (pre/post gzip) | proxy or respond instrumentation | Critical for T2/MP-1 |
+| Wire bytes (pre/post gzip) | proxy or respond instrumentation | Essential metric for T2/MP-1 |
 | Browser JS heap / WASM heap | Chrome memory, performance.memory | TV + Perfetto |
 | Disk growth | session dir size before/after | SSTABLE + op_stats + dcn pb |
 | Convert count | log tool tag + host | Detector N× confirmation |
