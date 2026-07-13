@@ -240,7 +240,7 @@ UI memory_viewer
 |----------|-------------|----------|
 | Small module, short sim trace | HloProto + modest JSON | **L–M** |
 | Large module, long heap_simulator_traces | V3 vectors + V6 dual heap + V10 JSON | **H** |
-| Timeline HTML enabled | V9 DOT/HTML on top of preprocess | **H–Critical** for huge traces |
+| Timeline HTML enabled | V9 DOT/HTML on top of preprocess | **H** for huge traces |
 | Switching memory space / module | Full re-convert each time (no durable preprocess cache beyond generic tool cache) | **H** multi-view sessions |
 
 ### Opportunities
@@ -327,7 +327,7 @@ get_peak_allocations(session_id, limit=10, min_size_mib=1.0, …)
 
 **Source:** [`plugin/xprof/cli/tools/get_peak_allocations_tool.py`](plugin/xprof/cli/tools/get_peak_allocations_tool.py).
 
-### Critical observation: N+1 full converts
+### Key observation: N+1 full converts
 
 | Step | Convert cost | Needed fields |
 |------|--------------|---------------|
@@ -357,8 +357,8 @@ If a session has 50 modules, the tool performs **1 list + 50 full memory_viewer 
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| GPA-1 | Stop serial full convert per module: batch peak mode or multi-module API | **Critical** | **observed** |
-| GPA-2 | `view=peak_buffers` convert: peak_heap_mib + max_heap (+ totals), **no** program-order vectors / dual sorts / spans | **Critical** | **observed** |
+| GPA-1 | Stop serial full convert per module: batch peak mode or multi-module API | **H** | **observed** |
+| GPA-2 | `view=peak_buffers` convert: peak_heap_mib + max_heap (+ totals), **no** program-order vectors / dual sorts / spans | **H** | **observed** |
 | GPA-3 | Two-phase: cheap per-module **total only** rank, then deep-dive top-K modules | **H** | hypothesized |
 | GPA-4 | Reuse disk HloProto + preprocess cache across modules (MV-6) so repeated CLI/UI share | **H** | hypothesized |
 | GPA-5 | Parallel module fetches with concurrency bound | **M** | hypothesized (reduces latency, not total RAM if unbounded) |
@@ -407,7 +407,7 @@ If a session has 50 modules, the tool performs **1 list + 50 full memory_viewer 
 
 | ID | Opportunity | Severity | Confidence | Touches |
 |----|-------------|----------|------------|---------|
-| FAM-1 | Convert **view modes**: `full` \| `ui` \| `summary` \| `peak_buffers` (and timeline as separate mode) | **Critical** | **observed** (CLI forces full) | processors, options, CLI, optional FE |
+| FAM-1 | Convert **view modes**: `full` \| `ui` \| `summary` \| `peak_buffers` (and timeline as separate mode) | **H** | **observed** (CLI forces full) | processors, options, CLI, optional FE |
 | FAM-2 | On-disk result cache keyed by `tool × module × memory_space × view × version` (beyond generic session cache) | **H** | hypothesized | convert/repository |
 | FAM-3 | JSON bloat policy: no `always_print` by default; optional compact; prefer binary for large arrays | **H** | **observed** (MP always_print; MV full vectors) | both tools |
 | FAM-4 | Shared HloProto extract already helps memory_viewer + graph_viewer; ensure peak CLI reuses same files without re-extract | **M** | **observed** path exists | HLO extract |
@@ -498,9 +498,9 @@ If a session has 50 modules, the tool performs **1 list + 50 full memory_viewer 
 
 | Tag | Meaning |
 |-----|---------|
-| **Critical** | Orders-of-magnitude waste or N× full converts on common CLI/UI paths |
+| **H** | Orders-of-magnitude waste or N× full converts on common CLI/UI paths |
 | **H** | Dominant peak or wire bloat on large real profiles |
-| **M** | Meaningful savings; secondary to Critical/H |
+| **M** | Meaningful savings; secondary to H |
 | **L** | Nice-to-have / small absolute win |
 
 **Confidence:**  
