@@ -263,14 +263,14 @@ All seven tools are **OpStats fan-out tools**: one expensive multi-host extract,
 | ID | Opportunity | Hotspot | Confidence | Affects |
 |----|-------------|---------|------------|---------|
 | FAM-OS-1 | **Incremental combine**: convert host → merge → drop host OpStats (fix TODO) | **H** | observed | all multi-host |
-| FAM-OS-2 | **Per-tool OpStatsOptions** (don't always build metrics+step+kernel) | **H** | observed always-true flags | all; biggest KS/IP/OV |
+| FAM-OS-2 | **Per-tool OpStatsOptions** (don't always build metrics+step+kernel) | **H** | observed | all; biggest KS/IP/OV |
 | FAM-OS-3 | **Wire row caps** where missing (kernel_stats, hlo_stats) | **H** | observed | KS, HS |
 | FAM-OS-4 | **Lazy heavy fields** (HLO expressions, recommendation HTML) | **H** | hypothesized | HS, OV |
 | FAM-OS-5 | **Host policy hygiene**: empty host ≠ all planes for non-aggregate tools; align op_profile/hlo_stats/roofline with explicit host required | **M** | observed | OP, HS, RF |
-| FAM-OS-6 | **Tool-result disk cache** beyond OpStats (JSON keyed by tool+host+options) | **M** | partial (use_saved_result) | all |
-| FAM-OS-7 | **JSON bloat policy**: no always_print; DataTable omit empty cells | **M** | observed OP | OP, tables |
+| FAM-OS-6 | **Tool-result disk cache** beyond OpStats (JSON keyed by tool+host+options) | **M** | hypothesized | all |
+| FAM-OS-7 | **JSON bloat policy**: no always_print; DataTable omit empty cells | **M** | observed | OP, tables |
 | FAM-OS-8 | **FE presentation ≠ storage**: pageSize only draws; still holds full payload — virtualize or server page | **M** | observed | KS, HS, FO |
-| FAM-OS-9 | **Concurrent convert cap** with warm-up (overview is DEFAULT_CACHE_TOOLS) | **H** | see 02-convert-serve-cache | OV + siblings |
+| FAM-OS-9 | **Concurrent convert cap** with warm-up (overview is DEFAULT_CACHE_TOOLS) | **H** | hypothesized | OV + siblings |
 | FAM-OS-10 | **InferenceStats sharing** so overview doesn't re-read XSpaces | **H** | observed | OV |
 
 ### ALL_HOSTS policy matrix (this family)

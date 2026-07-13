@@ -130,7 +130,7 @@ So FE cannot disable grouping; default true is good for size, but the URL contra
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| MP-1 | Set `content_encoding=gzip` (or skip outer gzip) for pre-gzipped Perfetto | **Critical** | observed |
+| MP-1 | Set `content_encoding=gzip` (or skip outer gzip) for pre-gzipped Perfetto | **H** | observed |
 | MP-2 | Stream / chunk Perfetto write; avoid holding XSpace+IR+Trace+gzip simultaneously | **H** | hypothesized |
 | MP-3 | Intern `Event.name` (StringId) like args | **H** | observed |
 | MP-4 | Viewport / time-range / device subset export (not full host) | **H** | hypothesized |
@@ -180,7 +180,7 @@ detect_layout_mismatch_copies(session)
 
 | # | What | Risk |
 |---|------|------|
-| L1 | All modules' `HloModule` protos resident | **Critical** for large multi-module sessions |
+| L1 | All modules' `HloModule` protos resident | **H** for large multi-module sessions |
 | L2 | Connectivity maps per module | O(N) memory; already optimized from O(N²) CPU |
 | L3 | BFS per **every** copy (not top-K filtered) | CPU heavy; visited sets per search |
 | L4 | Full `hlo_op_profile` via `get_top_hlo_ops` | Extra full-profile convert (cached 86400s) |
@@ -190,7 +190,7 @@ detect_layout_mismatch_copies(session)
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| LMC-1 | Do not load all modules at once — stream module-by-module from `*.hlo_proto.pb` | **Critical** | observed |
+| LMC-1 | Do not load all modules at once — stream module-by-module from `*.hlo_proto.pb` | **H** | observed |
 | LMC-2 | Restrict candidates to top-K copies by bytes/time **before** BFS | **H** | observed |
 | LMC-3 | Share one HLO index / debug_info cache across detector tools | **H** | hypothesized |
 | LMC-4 | Early filter: only copies with layout mismatch / non-optimal minor dim | **M** | hypothesized |
@@ -226,8 +226,8 @@ detect_unfused_reshapes(session, limit=50)
 | # | What | Risk |
 |---|------|------|
 | U1 | Full op_profile for top bytes | **H** first hit; then CLI SQLite cache |
-| U2 | **Per-candidate full module HLO text** via `graph_viewer` | **Critical** N× full text convert |
-| U3 | Module scan fallback: candidates × modules × full text | **Critical** worst case |
+| U2 | **Per-candidate full module HLO text** via `graph_viewer` | **H** N× full text convert |
+| U3 | Module scan fallback: candidates × modules × full text | **H** worst case |
 | U4 | `list_hlo_modules` / neighborhood cached 86400s | Mitigates repeat calls only |
 | U5 | Text graph rebuild each neighborhood call (even cached return is full string) | **H** |
 
@@ -237,8 +237,8 @@ This is the classic **N+1 convert** anti-pattern (similar spirit to `get_peak_al
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| URS-1 | Binary neighborhood from HloProto (no full text dump) | **Critical** | observed |
-| URS-2 | One module load + multi-instruction queries | **Critical** | observed |
+| URS-1 | Binary neighborhood from HloProto (no full text dump) | **H** | observed |
+| URS-2 | One module load + multi-instruction queries | **H** | observed |
 | URS-3 | Cap module fallback search; require module in op name | **H** | observed |
 | URS-4 | Reuse layout-mismatch style in-memory index (shared) | **H** | hypothesized |
 | URS-5 | Lower default limit / only top formatting ops | **M** | observed |
@@ -271,7 +271,7 @@ Better than layout-mismatch: **candidate-driven** from top ops, not full copy sc
 
 | # | What | Risk |
 |---|------|------|
-| C1 | All-module HLO protos | **Critical** same as LMC |
+| C1 | All-module HLO protos | **H** same as LMC |
 | C2 | Tracer indices per touched module | O(N) per module; reused within run | observed |
 | C3 | DFS upcast/downcast with visited (id, tuple_index) | Bounded by allowed opcodes | observed |
 | C4 | Top ops + full profile convert | **H** shared | observed |
@@ -281,7 +281,7 @@ Better than layout-mismatch: **candidate-driven** from top ops, not full copy sc
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| UCR-1 | Lazy per-module HLO load only for modules in top-ops set | **Critical** | observed |
+| UCR-1 | Lazy per-module HLO load only for modules in top-ops set | **H** | observed |
 | UCR-2 | Shared HLO session index with other detectors | **H** | hypothesized |
 | UCR-3 | Optional skip of top_ops dual lists (time+bytes doubles work) | **M** | hypothesized |
 | UCR-4 | Bound DFS visited size / depth hard limits | **L** | hypothesized |
@@ -324,7 +324,7 @@ get_overview(session)  [@cached 86400s]
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| GOV-1 | `summary_only` / `cli` convert mode emitting scalars only | **Critical** | observed |
+| GOV-1 | `summary_only` / `cli` convert mode emitting scalars only | **H** | observed |
 | GOV-2 | Reuse warm OpStats disk cache without re-serializing full OverviewPage UI tables | **H** | observed |
 | GOV-3 | Skip inference latency block for CLI summary | **M** | hypothesized |
 | GOV-4 | Shared policy with GMP-1 / FAM-1 (view modes) | **H** | observed |
@@ -337,10 +337,10 @@ get_overview(session)  [@cached 86400s]
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| DET-1 | Shared `SessionHloIndex`: lazy module map, single connectivity build | **Critical** | observed |
+| DET-1 | Shared `SessionHloIndex`: lazy module map, single connectivity build | **H** | observed |
 | DET-2 | Detectors must not force full `hlo_op_profile` UI proto — metrics-only extract | **H** | hypothesized |
 | DET-3 | Prefer on-disk `*.hlo_proto.pb` (`generate_hlo_protos`) over opaque `_fetch_debug_info` dump-all | **H** | observed |
-| DET-4 | Never fetch full graph_viewer text for structural graph queries | **Critical** | observed |
+| DET-4 | Never fetch full graph_viewer text for structural graph queries | **H** | observed |
 | DET-5 | Single-flight convert when MCP tools fan-out in parallel | **H** | hypothesized |
 | DET-6 | JSON `indent=2` for large inefficient_ops lists | **L** | observed |
 
@@ -350,10 +350,10 @@ get_overview(session)  [@cached 86400s]
 
 | Rank | ID | Description | Severity | Confidence | Effort |
 |------|-----|-------------|----------|------------|--------|
-| 1 | MP-1 | Stop double-gzip of Perfetto payload | **Critical** | observed | S |
-| 2 | URS-1/2 | Neighborhood without full HLO text × N | **Critical** | observed | M–L |
-| 3 | LMC-1 / UCR-1 | Lazy / streaming per-module HLO | **Critical** | observed | M |
-| 4 | GOV-1 | Overview summary_only for CLI | **Critical** | observed | M |
+| 1 | MP-1 | Stop double-gzip of Perfetto payload | **H** | observed | S |
+| 2 | URS-1/2 | Neighborhood without full HLO text × N | **H** | observed | M–L |
+| 3 | LMC-1 / UCR-1 | Lazy / streaming per-module HLO | **H** | observed | M |
+| 4 | GOV-1 | Overview summary_only for CLI | **H** | observed | M |
 | 5 | MP-5 / MP-3 | FE transfer + intern event names | **H** | observed | S–M |
 | 6 | DET-1 | Shared HLO index across detectors | **H** | hypothesized | L |
 | 7 | LMC-2 | Top-K copy candidates only | **H** | observed | S |
@@ -368,11 +368,11 @@ get_overview(session)  [@cached 86400s]
 | Tool | Dominant risk | Severity | Confidence |
 |------|---------------|----------|------------|
 | megascale_stats (table) | Cold multi-host DCN convert | **M** | observed |
-| megascale_perfetto | Full XSpace→IR→Trace + double gzip + FE clone | **Critical** | observed |
-| detect_layout_mismatch | All-module HLO + all copies BFS | **Critical** | observed |
-| detect_unfused_reshapes | N× full graph_viewer text | **Critical** | observed |
-| detect_unnecessary_convert_reduce | All-module HLO (candidate-limited logic) | **H–Critical** | observed |
-| get_overview_tool | Full multi-host OpStats/Overview for scalars | **Critical** (first hit) | observed |
+| megascale_perfetto | Full XSpace→IR→Trace + double gzip + FE clone | **H** | observed |
+| detect_layout_mismatch | All-module HLO + all copies BFS | **H** | observed |
+| detect_unfused_reshapes | N× full graph_viewer text | **H** | observed |
+| detect_unnecessary_convert_reduce | All-module HLO (candidate-limited logic) | **H** | observed |
+| get_overview_tool | Full multi-host OpStats/Overview for scalars | **H** (first hit) | observed |
 
 ---
 

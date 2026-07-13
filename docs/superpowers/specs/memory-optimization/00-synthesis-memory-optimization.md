@@ -171,13 +171,16 @@ Full detail: **`01-trace-viewer-path.md`**.
 
 ## Campaign method (how this analysis was produced)
 
-| Wave | Concurrent | Focus | Docs |
-|------|------------|-------|------|
-| 1 | 3 | Trace path; convert/serve; memory family | 01–03 |
-| 2 | 3 | Overview/stats; graph/HLO/util; megascale+CLI | 04–06 |
-| 3 | controller | Inventory coverage + synthesis | 00 |
+| Wave | Concurrent | Focus | Docs (approx lines) |
+|------|------------|-------|---------------------|
+| 1 (initial) | 3 | Trace, convert/serve, memory family | 01–03 (later deepened) |
+| 2 (initial) | 3 | Overview/stats; graph/HLO/util; megascale+CLI | 04–06 |
+| Depth re-audit wave 1 | 3 | **Deepen** 01/02/03 from code | 01=762 · 02=930 · 03=521 |
+| Depth re-audit wave 2 | 1 | Spot-audit 04–06 + fix gaps | monitored |
 
-**Constraint:** max **3** concurrent research subagents; waves advanced on completion (finite campaign; not infinite 10‑minute forever loop after inventory complete).
+**Constraint:** max **3** concurrent research subagents; controller monitors each to DONE|FAILED.
+
+**Depth rule:** `01-trace-viewer-path.md` is the deepest **single-tool-family** note (762 lines) vs multi-tool family docs 03–06. Doc 02 is cross-cutting convert/serve (not a single tool).
 
 **Log:** `{SCRATCH}/subagent-campaign.log`
 
