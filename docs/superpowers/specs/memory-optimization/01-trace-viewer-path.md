@@ -150,3 +150,34 @@ BROWSER: inflate gzip → JSON.parse or WASM zstd/proto → SoA timeline / Catap
 | LevelDB block | 20 MiB | `trace_events.cc` |
 | FE multi-host cap | 10 | `trace_viewer.ts` |
 | use_pb default | false | `feature_flags.ts` |
+
+
+## 10. Adjacent UI: `stack_trace_page` / `stack_trace_snippet`
+
+**Role (observed):** Angular bridge so Trace Viewer (non-Angular Catapult path) and tools like op_profile / hlo_stats / roofline can show source/HLO snippets around a stack frame. Query params carry `stack_trace`, `hlo_module`, `hlo_op`, `source`, `session_id` — not a separate XPLANE convert tool.
+
+**Paths:**
+- `frontend/app/components/stack_trace_page/stack_trace_page.ts`
+- `frontend/app/components/stack_trace_snippet/`
+- Referenced from `frontend/app/components/trace_viewer/constants.ts` (`stack_trace_page`)
+- Embedded toggles: `op_profile_base.ts`, `hlo_stats.ts`, `roofline_model/.../operation_level_analysis.ts`
+
+### Materialization
+
+| Stage | What is held | Confidence |
+|-------|--------------|------------|
+| Route query | Full stack_trace + hlo module strings in component fields | observed |
+| SourceCodeService | Temporary availability check; may load file slices | observed (service token) |
+| Parent tools | `showStackTrace` toggles keep parent tool tables resident while snippet open | observed |
+
+### Opportunities
+
+| ID | Opportunity | Severity | Confidence |
+|----|-------------|----------|------------|
+| ST-1 | Cap / truncate very long `stack_trace` query strings before navigation (URL + component heap) | **L** | hypothesized |
+| ST-2 | Lazy-load `StackTraceSnippet` module only when panel open (avoid main bundle retain) | **L** | hypothesized |
+| ST-3 | Release SourceCodeService file buffers when page destroyed (ensure no global cache growth) | **M** | hypothesized |
+| ST-4 | Avoid duplicating HLO text already loaded by graph_viewer/op_profile — pass handles/IDs not full text | **M** | hypothesized |
+| ST-5 | Trace Viewer deep-link: open snippet without retaining full Catapult model in background tab | **M** | hypothesized |
+
+**Note:** Not an XPLANE_TOOLS entry; memory impact is secondary to the parent tool payload. Severity is generally **L–M** vs convert paths.

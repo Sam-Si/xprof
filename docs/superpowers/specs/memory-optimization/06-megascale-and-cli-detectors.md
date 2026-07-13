@@ -69,9 +69,9 @@ Table path is **moderate** relative to Perfetto/trace. Cold multi-host convert i
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| MS-1 | Lazier cold DCN: only convert requested host first; defer ALL_HOSTS combine | **M** | medium |
-| MS-2 | Free FE `dataTable` / `dataInfo` on panel close / host change | **L** | high |
-| MS-3 | Skip re-gzip if body already compressed (shared) | **M** | high (shared with 02) |
+| MS-1 | Lazier cold DCN: only convert requested host first; defer ALL_HOSTS combine | **M** | hypothesized |
+| MS-2 | Free FE `dataTable` / `dataInfo` on panel close / host change | **L** | observed |
+| MS-3 | Skip re-gzip if body already compressed (shared) | **M** | observed |
 | MS-4 | Bound / paginate table rows for pathological #rendezvous | **L** | hypothesized |
 
 **Top:** MS-1 (cold multi-host), then shared gzip policy.
@@ -130,15 +130,15 @@ So FE cannot disable grouping; default true is good for size, but the URL contra
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| MP-1 | Set `content_encoding=gzip` (or skip outer gzip) for pre-gzipped Perfetto | **Critical** | high |
-| MP-2 | Stream / chunk Perfetto write; avoid holding XSpace+IR+Trace+gzip simultaneously | **H** | medium |
-| MP-3 | Intern `Event.name` (StringId) like args | **H** | high |
-| MP-4 | Viewport / time-range / device subset export (not full host) | **H** | medium |
-| MP-5 | FE: transfer ArrayBuffer in `postMessage` transfer list; drop blob after `arrayBuffer` | **H** | high |
-| MP-6 | Plumb `group_tiny_events` end-to-end; optional aggressive thresholds | **M** | high |
-| MP-7 | Drop non-essential lines/args earlier (already skips some StatTypes) | **M** | medium |
+| MP-1 | Set `content_encoding=gzip` (or skip outer gzip) for pre-gzipped Perfetto | **Critical** | observed |
+| MP-2 | Stream / chunk Perfetto write; avoid holding XSpace+IR+Trace+gzip simultaneously | **H** | hypothesized |
+| MP-3 | Intern `Event.name` (StringId) like args | **H** | observed |
+| MP-4 | Viewport / time-range / device subset export (not full host) | **H** | hypothesized |
+| MP-5 | FE: transfer ArrayBuffer in `postMessage` transfer list; drop blob after `arrayBuffer` | **H** | observed |
+| MP-6 | Plumb `group_tiny_events` end-to-end; optional aggressive thresholds | **M** | observed |
+| MP-7 | Drop non-essential lines/args earlier (already skips some StatTypes) | **M** | hypothesized |
 | MP-8 | Disk/LevelDB intermediate like `trace_viewer@` for re-open | **M** | hypothesized |
-| MP-9 | Server size budget → explicit error vs empty body | **M** | medium |
+| MP-9 | Server size budget → explicit error vs empty body | **M** | hypothesized |
 
 **Top:** MP-1, MP-5, MP-3, MP-2/MP-4.
 
@@ -148,10 +148,10 @@ So FE cannot disable grouping; default true is good for size, but the URL contra
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| FE-MS-1 | `onPanelClosed` does not clear `dataInfo` / Dashboard `dataTable` | **L** | high |
-| FE-MS-2 | Perfetto path keeps no explicit ref after postMessage, but clone without transfer keeps peak high | **H** | high |
+| FE-MS-1 | `onPanelClosed` does not clear `dataInfo` / Dashboard `dataTable` | **L** | observed |
+| FE-MS-2 | Perfetto path keeps no explicit ref after postMessage, but clone without transfer keeps peak high | **H** | observed |
 | FE-MS-3 | Cross-origin Perfetto iframe — no control of viewer heap after handoff | **M** | observed constraint |
-| FE-MS-4 | Host switch does not abort in-flight fetch | **L** | medium |
+| FE-MS-4 | Host switch does not abort in-flight fetch | **L** | hypothesized |
 
 ---
 
@@ -190,11 +190,11 @@ detect_layout_mismatch_copies(session)
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| LMC-1 | Do not load all modules at once — stream module-by-module from `*.hlo_proto.pb` | **Critical** | high |
-| LMC-2 | Restrict candidates to top-K copies by bytes/time **before** BFS | **H** | high |
-| LMC-3 | Share one HLO index / debug_info cache across detector tools | **H** | medium |
-| LMC-4 | Early filter: only copies with layout mismatch / non-optimal minor dim | **M** | medium |
-| LMC-5 | Avoid full op_profile when only enriching metrics for matches | **M** | medium |
+| LMC-1 | Do not load all modules at once — stream module-by-module from `*.hlo_proto.pb` | **Critical** | observed |
+| LMC-2 | Restrict candidates to top-K copies by bytes/time **before** BFS | **H** | observed |
+| LMC-3 | Share one HLO index / debug_info cache across detector tools | **H** | hypothesized |
+| LMC-4 | Early filter: only copies with layout mismatch / non-optimal minor dim | **M** | hypothesized |
+| LMC-5 | Avoid full op_profile when only enriching metrics for matches | **M** | hypothesized |
 | LMC-6 | OSS implement `_fetch_debug_info` via on-disk protos (lazy) not dump-all | **H** | high (gap) |
 
 **Top:** LMC-1, LMC-2, LMC-3.
@@ -237,11 +237,11 @@ This is the classic **N+1 convert** anti-pattern (similar spirit to `get_peak_al
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| URS-1 | Binary neighborhood from HloProto (no full text dump) | **Critical** | high |
-| URS-2 | One module load + multi-instruction queries | **Critical** | high |
-| URS-3 | Cap module fallback search; require module in op name | **H** | high |
-| URS-4 | Reuse layout-mismatch style in-memory index (shared) | **H** | medium |
-| URS-5 | Lower default limit / only top formatting ops | **M** | high |
+| URS-1 | Binary neighborhood from HloProto (no full text dump) | **Critical** | observed |
+| URS-2 | One module load + multi-instruction queries | **Critical** | observed |
+| URS-3 | Cap module fallback search; require module in op name | **H** | observed |
+| URS-4 | Reuse layout-mismatch style in-memory index (shared) | **H** | hypothesized |
+| URS-5 | Lower default limit / only top formatting ops | **M** | observed |
 
 **Top:** URS-1, URS-2.
 
@@ -281,10 +281,10 @@ Better than layout-mismatch: **candidate-driven** from top ops, not full copy sc
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| UCR-1 | Lazy per-module HLO load only for modules in top-ops set | **Critical** | high |
-| UCR-2 | Shared HLO session index with other detectors | **H** | medium |
-| UCR-3 | Optional skip of top_ops dual lists (time+bytes doubles work) | **M** | medium |
-| UCR-4 | Bound DFS visited size / depth hard limits | **L** | medium |
+| UCR-1 | Lazy per-module HLO load only for modules in top-ops set | **Critical** | observed |
+| UCR-2 | Shared HLO session index with other detectors | **H** | hypothesized |
+| UCR-3 | Optional skip of top_ops dual lists (time+bytes doubles work) | **M** | hypothesized |
+| UCR-4 | Bound DFS visited size / depth hard limits | **L** | hypothesized |
 
 **Top:** UCR-1, UCR-2.
 
@@ -324,10 +324,10 @@ get_overview(session)  [@cached 86400s]
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| GOV-1 | `summary_only` / `cli` convert mode emitting scalars only | **Critical** | high |
-| GOV-2 | Reuse warm OpStats disk cache without re-serializing full OverviewPage UI tables | **H** | high |
-| GOV-3 | Skip inference latency block for CLI summary | **M** | medium |
-| GOV-4 | Shared policy with GMP-1 / FAM-1 (view modes) | **H** | high |
+| GOV-1 | `summary_only` / `cli` convert mode emitting scalars only | **Critical** | observed |
+| GOV-2 | Reuse warm OpStats disk cache without re-serializing full OverviewPage UI tables | **H** | observed |
+| GOV-3 | Skip inference latency block for CLI summary | **M** | hypothesized |
+| GOV-4 | Shared policy with GMP-1 / FAM-1 (view modes) | **H** | observed |
 
 **Top:** GOV-1 (mirror memory-family summary_only).
 
@@ -337,12 +337,12 @@ get_overview(session)  [@cached 86400s]
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| DET-1 | Shared `SessionHloIndex`: lazy module map, single connectivity build | **Critical** | high |
-| DET-2 | Detectors must not force full `hlo_op_profile` UI proto — metrics-only extract | **H** | medium |
-| DET-3 | Prefer on-disk `*.hlo_proto.pb` (`generate_hlo_protos`) over opaque `_fetch_debug_info` dump-all | **H** | high |
+| DET-1 | Shared `SessionHloIndex`: lazy module map, single connectivity build | **Critical** | observed |
+| DET-2 | Detectors must not force full `hlo_op_profile` UI proto — metrics-only extract | **H** | hypothesized |
+| DET-3 | Prefer on-disk `*.hlo_proto.pb` (`generate_hlo_protos`) over opaque `_fetch_debug_info` dump-all | **H** | observed |
 | DET-4 | Never fetch full graph_viewer text for structural graph queries | **Critical** | high (URS) |
 | DET-5 | Single-flight convert when MCP tools fan-out in parallel | **H** | hypothesized |
-| DET-6 | JSON `indent=2` for large inefficient_ops lists | **L** | high |
+| DET-6 | JSON `indent=2` for large inefficient_ops lists | **L** | observed |
 
 ---
 
@@ -350,16 +350,16 @@ get_overview(session)  [@cached 86400s]
 
 | Rank | ID | Description | Severity | Confidence | Effort |
 |------|-----|-------------|----------|------------|--------|
-| 1 | MP-1 | Stop double-gzip of Perfetto payload | **Critical** | high | S |
-| 2 | URS-1/2 | Neighborhood without full HLO text × N | **Critical** | high | M–L |
-| 3 | LMC-1 / UCR-1 | Lazy / streaming per-module HLO | **Critical** | high | M |
-| 4 | GOV-1 | Overview summary_only for CLI | **Critical** | high | M |
-| 5 | MP-5 / MP-3 | FE transfer + intern event names | **H** | high | S–M |
-| 6 | DET-1 | Shared HLO index across detectors | **H** | medium | L |
-| 7 | LMC-2 | Top-K copy candidates only | **H** | high | S |
-| 8 | MP-2 / MP-4 | Subset / streaming Perfetto export | **H** | medium | L |
-| 9 | MS-1 | Lazier DCN ALL_HOSTS cold path | **M** | medium | M |
-| 10 | MP-6 | Plumb group_tiny_events | **M** | high | S |
+| 1 | MP-1 | Stop double-gzip of Perfetto payload | **Critical** | observed | S |
+| 2 | URS-1/2 | Neighborhood without full HLO text × N | **Critical** | observed | M–L |
+| 3 | LMC-1 / UCR-1 | Lazy / streaming per-module HLO | **Critical** | observed | M |
+| 4 | GOV-1 | Overview summary_only for CLI | **Critical** | observed | M |
+| 5 | MP-5 / MP-3 | FE transfer + intern event names | **H** | observed | S–M |
+| 6 | DET-1 | Shared HLO index across detectors | **H** | hypothesized | L |
+| 7 | LMC-2 | Top-K copy candidates only | **H** | observed | S |
+| 8 | MP-2 / MP-4 | Subset / streaming Perfetto export | **H** | hypothesized | L |
+| 9 | MS-1 | Lazier DCN ALL_HOSTS cold path | **M** | hypothesized | M |
+| 10 | MP-6 | Plumb group_tiny_events | **M** | observed | S |
 
 ---
 
@@ -367,12 +367,12 @@ get_overview(session)  [@cached 86400s]
 
 | Tool | Dominant risk | Severity | Confidence |
 |------|---------------|----------|------------|
-| megascale_stats (table) | Cold multi-host DCN convert | **M** | high |
-| megascale_perfetto | Full XSpace→IR→Trace + double gzip + FE clone | **Critical** | high |
-| detect_layout_mismatch | All-module HLO + all copies BFS | **Critical** | high |
-| detect_unfused_reshapes | N× full graph_viewer text | **Critical** | high |
-| detect_unnecessary_convert_reduce | All-module HLO (candidate-limited logic) | **H–Critical** | high |
-| get_overview_tool | Full multi-host OpStats/Overview for scalars | **Critical** (first hit) | high |
+| megascale_stats (table) | Cold multi-host DCN convert | **M** | observed |
+| megascale_perfetto | Full XSpace→IR→Trace + double gzip + FE clone | **Critical** | observed |
+| detect_layout_mismatch | All-module HLO + all copies BFS | **Critical** | observed |
+| detect_unfused_reshapes | N× full graph_viewer text | **Critical** | observed |
+| detect_unnecessary_convert_reduce | All-module HLO (candidate-limited logic) | **H–Critical** | observed |
+| get_overview_tool | Full multi-host OpStats/Overview for scalars | **Critical** (first hit) | observed |
 
 ---
 

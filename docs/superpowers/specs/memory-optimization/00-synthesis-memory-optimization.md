@@ -52,6 +52,7 @@ On-disk XPlane / HLO
 | convert → serve → cache | 02 |
 | tools_cache / generate_cache | 02 |
 | megascale_perfetto FE | 06 |
+| stack_trace_page / stack_trace_snippet | 01 (adjacent) |
 | CLI tools | 03, 05, 06 |
 
 ### CLI tools

@@ -32,11 +32,11 @@ XSpace → GetXSpace → GenerateMemoryProfile (all alloc/dealloc snapshots) →
 ### Opportunities
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| MP-1 | Two-pass peak without storing all events | **H** | medium |
-| MP-2 | Slim timeline samples (stats only, no activity_metadata) | **H** | high |
-| MP-3 | Disable always_print empty fields | **M** | high |
-| MP-4 | Expose max_num_snapshots via options | **M** | high |
-| MP-6 | String interning for repeated op names | **M** | medium |
+| MP-1 | Two-pass peak without storing all events | **H** | hypothesized |
+| MP-2 | Slim timeline samples (stats only, no activity_metadata) | **H** | observed |
+| MP-3 | Disable always_print empty fields | **M** | observed |
+| MP-4 | Expose max_num_snapshots via options | **M** | observed |
+| MP-6 | String interning for repeated op names | **M** | hypothesized |
 
 **Top:** MP-2, MP-1, MP-3
 
@@ -58,12 +58,12 @@ HloProto → heap simulator → max_heap (+ **duplicate** max_heap_by_size) → 
 ### Opportunities
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| MV-1 | Drop dual-sorted max_heap from wire | **H** | high |
-| MV-2 | Downsample program-order timelines | **H** | medium |
-| MV-3 | Lazy hlo_instruction_names | **H** | medium |
-| MV-4 | Replace std::list | **M** | high |
-| MV-6 | Cache PreprocessResult per module×memory_space | **H** | medium |
-| MV-7 | Bound timeline HTML/DOT | **M** | high |
+| MV-1 | Drop dual-sorted max_heap from wire | **H** | observed |
+| MV-2 | Downsample program-order timelines | **H** | hypothesized |
+| MV-3 | Lazy hlo_instruction_names | **H** | hypothesized |
+| MV-4 | Replace std::list | **M** | observed |
+| MV-6 | Cache PreprocessResult per module×memory_space | **H** | hypothesized |
+| MV-7 | Bound timeline HTML/DOT | **M** | observed |
 
 **Top:** MV-1, MV-2/3, MV-6, MV-4
 
@@ -75,8 +75,8 @@ Path: full `memory_profile.json` convert → parse to **scalar summary only** �
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| GMP-1 | summary_only convert mode | **H** | high |
-| GMP-3 | Smarter host short-circuit | **M** | medium |
+| GMP-1 | summary_only convert mode | **H** | observed |
+| GMP-3 | Smarter host short-circuit | **M** | hypothesized |
 
 ---
 
@@ -86,9 +86,9 @@ Path: list modules → **for each module full memory_viewer convert** → aggreg
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| GPA-1 | Stop serial full convert per module | **Critical** | high |
-| GPA-2 | peak-only convert mode | **Critical** | high |
-| GPA-4 | Cheap total-based rank then deep-dive top-K | **H** | medium |
+| GPA-1 | Stop serial full convert per module | **Critical** | observed |
+| GPA-2 | peak-only convert mode | **Critical** | observed |
+| GPA-4 | Cheap total-based rank then deep-dive top-K | **H** | hypothesized |
 
 ---
 
@@ -96,11 +96,11 @@ Path: list modules → **for each module full memory_viewer convert** → aggreg
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| FAM-1 | Convert view modes: full \| ui \| summary \| peak_buffers | **Critical** | high |
-| FAM-2 | On-disk result cache keyed by module/view | **H** | medium |
-| FAM-3 | JSON bloat policy | **H** | high |
-| FAM-5 | Complete memory.py options (max_snapshots, summary_only) | **M** | high |
-| FAM-6 | CLI must not force UI-scale protos | **H** | high |
+| FAM-1 | Convert view modes: full \| ui \| summary \| peak_buffers | **Critical** | observed |
+| FAM-2 | On-disk result cache keyed by module/view | **H** | hypothesized |
+| FAM-3 | JSON bloat policy | **H** | observed |
+| FAM-5 | Complete memory.py options (max_snapshots, summary_only) | **M** | observed |
+| FAM-6 | CLI must not force UI-scale protos | **H** | observed |
 
 ### Family priority order
 1. FAM-1 / GPA-2 / GMP-1 — summary & peak modes  

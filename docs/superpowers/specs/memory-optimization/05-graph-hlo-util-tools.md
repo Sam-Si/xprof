@@ -86,15 +86,15 @@ FE: iframe Graphviz HTML + separate op_profile fetch for hover metrics
 
 | ID | Opportunity | Severity | Confidence | Effort |
 |----|-------------|----------|------------|--------|
-| GV-1 | Cache rendered graph/txt keyed by module×node×width×flags on disk | **H** | high | M |
-| GV-2 | Bound graph HTML size server-side (hard fail / auto-shrink width) — FE only warns at 1 MB | **H** | high | S–M |
-| GV-3 | Avoid full module IR for `pb` / partial for adjacency-only | **M** | high | M |
-| GV-4 | Stream or zstd compress large HTML/txt; skip double gzip policy (shared) | **H** | medium | M |
-| GV-5 | Lazy op_profile: fetch metrics for visible nodes only, not limit=300 tree | **H** | high | M |
-| GV-6 | Index instruction→module at HLO extract time; kill full-module scan fallback | **M** | high | M |
-| GV-7 | Cap default graph_width=1 end-to-end (align FE / options / C++) | **M** | high | S |
-| GV-8 | Free HloProto after IR build (or build IR without retaining both) | **M** | medium | M |
-| GV-9 | CLI `summary` / neighborhood-only modes; never force `long_txt` without max_lines server-side | **M** | high | S |
+| GV-1 | Cache rendered graph/txt keyed by module×node×width×flags on disk | **H** | observed | M |
+| GV-2 | Bound graph HTML size server-side (hard fail / auto-shrink width) — FE only warns at 1 MB | **H** | observed | S–M |
+| GV-3 | Avoid full module IR for `pb` / partial for adjacency-only | **M** | observed | M |
+| GV-4 | Stream or zstd compress large HTML/txt; skip double gzip policy (shared) | **H** | hypothesized | M |
+| GV-5 | Lazy op_profile: fetch metrics for visible nodes only, not limit=300 tree | **H** | observed | M |
+| GV-6 | Index instruction→module at HLO extract time; kill full-module scan fallback | **M** | observed | M |
+| GV-7 | Cap default graph_width=1 end-to-end (align FE / options / C++) | **M** | observed | S |
+| GV-8 | Free HloProto after IR build (or build IR without retaining both) | **M** | hypothesized | M |
+| GV-9 | CLI `summary` / neighborhood-only modes; never force `long_txt` without max_lines server-side | **M** | observed | S |
 
 **Top:** GV-2, GV-5, GV-1, GV-7
 
@@ -131,13 +131,13 @@ FE: array of Google DataTables; holds all models at once
 
 | ID | Opportunity | Severity | Confidence | Effort |
 |----|-------------|----------|------------|--------|
-| IP-1 | Online / streaming sample: never retain all request_details | **H** | high | L |
-| IP-2 | Bound host parallelism (semaphore) instead of `min(MaxParallelism, N)` | **H** | high | S |
-| IP-3 | Drop full request_details after sample (clear before JSON) | **H** | high | S |
-| IP-4 | Per-model / percentile-column incremental re-fetch (today full recompute on column change via options) | **M** | medium | M |
-| IP-5 | FE: load selected model tables only | **M** | high | M |
-| IP-6 | Disk cache of combined InferenceStats / sampled JSON | **M** | medium | M |
-| IP-7 | Multi-host correctness path (FE warns b/474172782) — avoid loading N hosts when wrong | **M** | medium | M |
+| IP-1 | Online / streaming sample: never retain all request_details | **H** | observed | L |
+| IP-2 | Bound host parallelism (semaphore) instead of `min(MaxParallelism, N)` | **H** | observed | S |
+| IP-3 | Drop full request_details after sample (clear before JSON) | **H** | observed | S |
+| IP-4 | Per-model / percentile-column incremental re-fetch (today full recompute on column change via options) | **M** | hypothesized | M |
+| IP-5 | FE: load selected model tables only | **M** | observed | M |
+| IP-6 | Disk cache of combined InferenceStats / sampled JSON | **M** | hypothesized | M |
+| IP-7 | Multi-host correctness path (FE warns b/474172782) — avoid loading N hosts when wrong | **M** | hypothesized | M |
 
 **Top:** IP-1 / IP-3, IP-2, IP-5
 
@@ -170,11 +170,11 @@ CLI get_utilization_viewer: fetch tqx=csv → parse all rows → ~10 scalar % me
 
 | ID | Opportunity | Severity | Confidence | Effort |
 |----|-------------|----------|------------|--------|
-| UV-1 | CLI / `summary` convert mode: aggregate % only (no per-sample rows) | **H** | high | M |
-| UV-2 | Server-side host/device/node + sample downsample filters | **H** | high | M |
-| UV-3 | Skip derived_timeline if only counters needed (if safe) | **M** | medium | M |
-| UV-4 | FE: one DataView; no per-chart full copies | **M** | medium | M |
-| UV-5 | Cache utilization DataTable on disk per host | **L** | medium | S |
+| UV-1 | CLI / `summary` convert mode: aggregate % only (no per-sample rows) | **H** | observed | M |
+| UV-2 | Server-side host/device/node + sample downsample filters | **H** | observed | M |
+| UV-3 | Skip derived_timeline if only counters needed (if safe) | **M** | hypothesized | M |
+| UV-4 | FE: one DataView; no per-chart full copies | **M** | hypothesized | M |
+| UV-5 | Cache utilization DataTable on disk per host | **L** | hypothesized | S |
 
 **Top:** UV-1, UV-2
 
@@ -214,12 +214,12 @@ CLI: get_smart_suggestions → HTTP, cached 86400s decorator
 
 | ID | Opportunity | Severity | Confidence | Effort |
 |----|-------------|----------|------------|--------|
-| SS-1 | Stream OpStats combine (shared with pod_viewer / overview) — drop all_op_stats vector | **H** | high | L |
-| SS-2 | Prefer binary proto paths in ToolDataProvider; **no JSON round-trip** | **H** | high | M |
-| SS-3 | Rule-specific minimal signals (duty cycle, % bound) without full MemoryProfile / OpProfile trees | **H** | medium | L |
-| SS-4 | Single-flight + durable report cache (already partial); share warm OpStats with UI | **M** | high | S–M |
-| SS-5 | Lazy rule evaluation: stop after K suggestions; skip unused providers | **M** | medium | M |
-| SS-6 | FE already small; strip HTML server-side for CLI (done via `strip_html`) | **L** | high | — |
+| SS-1 | Stream OpStats combine (shared with pod_viewer / overview) — drop all_op_stats vector | **H** | observed | L |
+| SS-2 | Prefer binary proto paths in ToolDataProvider; **no JSON round-trip** | **H** | observed | M |
+| SS-3 | Rule-specific minimal signals (duty cycle, % bound) without full MemoryProfile / OpProfile trees | **H** | hypothesized | L |
+| SS-4 | Single-flight + durable report cache (already partial); share warm OpStats with UI | **M** | observed | S–M |
+| SS-5 | Lazy rule evaluation: stop after K suggestions; skip unused providers | **M** | hypothesized | M |
+| SS-6 | FE already small; strip HTML server-side for CLI (done via `strip_html`) | **L** | observed | — |
 
 **Top:** SS-1 (shared), SS-2, SS-3
 
@@ -252,12 +252,12 @@ FE: full google.visualization.DataTable; pageSize 30–200 (UI page only)
 
 | ID | Opportunity | Severity | Confidence | Effort |
 |----|-------------|----------|------------|--------|
-| PC-1 | Aggregate / downsample samples server-side (mean/max per counter) for UI default | **H** | high | M |
-| PC-2 | Intern Description/Set strings; optional omit Description on wire | **M** | high | S |
-| PC-3 | Host/chip/counter filters as convert options | **M** | high | S |
-| PC-4 | Columnar / protobuf wire instead of DataTable JSON | **M** | medium | L |
-| PC-5 | FE virtual scroll + progressive fetch | **M** | medium | M |
-| PC-6 | Multi-host: don’t default to all hosts if UI only shows one | **L** | medium | S |
+| PC-1 | Aggregate / downsample samples server-side (mean/max per counter) for UI default | **H** | observed | M |
+| PC-2 | Intern Description/Set strings; optional omit Description on wire | **M** | observed | S |
+| PC-3 | Host/chip/counter filters as convert options | **M** | observed | S |
+| PC-4 | Columnar / protobuf wire instead of DataTable JSON | **M** | hypothesized | L |
+| PC-5 | FE virtual scroll + progressive fetch | **M** | hypothesized | M |
+| PC-6 | Multi-host: don’t default to all hosts if UI only shows one | **L** | hypothesized | S |
 
 **Top:** PC-1, PC-2, PC-3
 
@@ -288,11 +288,11 @@ FE: full PodViewerDatabase → topology + stack bars
 
 | ID | Opportunity | Severity | Confidence | Effort |
 |----|-------------|----------|------------|--------|
-| PV-1 | Stream OpStats combine (shared SS-1) | **H** | high | L |
-| PV-2 | Cap steps in merge (`std::numeric_limits::max()` today) | **H** | high | S |
-| PV-3 | Disable always_print; slim bottleneck-only view mode | **M** | high | S |
-| PV-4 | Pod-only intermediate (skip full OpStats fields unused by pod) | **H** | medium | L |
-| PV-5 | FE: step window / virtualize topology | **M** | medium | M |
+| PV-1 | Stream OpStats combine (shared SS-1) | **H** | observed | L |
+| PV-2 | Cap steps in merge (`std::numeric_limits::max()` today) | **H** | observed | S |
+| PV-3 | Disable always_print; slim bottleneck-only view mode | **M** | observed | S |
+| PV-4 | Pod-only intermediate (skip full OpStats fields unused by pod) | **H** | hypothesized | L |
+| PV-5 | FE: step window / virtualize topology | **M** | hypothesized | M |
 
 **Top:** PV-1, PV-2, PV-4
 
@@ -302,22 +302,22 @@ FE: full PodViewerDatabase → topology + stack bars
 
 | CLI | Convert dependency | Memory issue | Severity | Confidence |
 |-----|-------------------|--------------|----------|------------|
-| **get_graph_viewer** | Full `graph_viewer` | Returns entire HTML/txt; no server bound | **H** | high |
-| **get_utilization_viewer** | Full `utilization_viewer` CSV → scalars | **Classic UI-scale force** (like GMP-1 pattern in memory tools) | **H** | high |
-| **get_smart_suggestions** | `smart_suggestion` | Peak on cold cache = multi-tool convert; decorator 86400 helps warm | **H** cold / **L** warm | high |
-| **get_kpi_metrics** | `get_overview` + `get_memory_profile` | Two full tool converts for ~6 scalars | **H** | high |
-| **get_top_hlo_ops** | Full `hlo_op_profile` tree → flatten → heapq top-K | Full tree for K=10; `@cached(86400)` | **H** | high |
-| **hlo_tools** (module text / neighborhood) | `graph_viewer` types | `long_txt` module dump; client max_lines only | **M–H** | high |
+| **get_graph_viewer** | Full `graph_viewer` | Returns entire HTML/txt; no server bound | **H** | observed |
+| **get_utilization_viewer** | Full `utilization_viewer` CSV → scalars | **Classic UI-scale force** (like GMP-1 pattern in memory tools) | **H** | observed |
+| **get_smart_suggestions** | `smart_suggestion` | Peak on cold cache = multi-tool convert; decorator 86400 helps warm | **H** cold / **L** warm | observed |
+| **get_kpi_metrics** | `get_overview` + `get_memory_profile` | Two full tool converts for ~6 scalars | **H** | observed |
+| **get_top_hlo_ops** | Full `hlo_op_profile` tree → flatten → heapq top-K | Full tree for K=10; `@cached(86400)` | **H** | observed |
+| **hlo_tools** (module text / neighborhood) | `graph_viewer` types | `long_txt` module dump; client max_lines only | **M–H** | observed |
 
 ### CLI opportunities
 
 | ID | Opportunity | Severity | Confidence |
 |----|-------------|----------|------------|
-| CLI-GV-1 | Server `summary` / `top_k` / `neighborhood` flags for graph + op profile | **H** | high |
-| CLI-UV-1 | utilization `metrics_only` convert (UV-1) | **H** | high |
-| CLI-KPI-1 | overview + memory summary modes (align FAM-1 from memory family) | **H** | high |
-| CLI-TOP-1 | op_profile convert option `top_ops_limit` without full tree materialization | **H** | medium |
-| CLI-SS-1 | Rely on SMART_SUGGESTION disk cache; never refresh unless asked | **M** | high |
+| CLI-GV-1 | Server `summary` / `top_k` / `neighborhood` flags for graph + op profile | **H** | observed |
+| CLI-UV-1 | utilization `metrics_only` convert (UV-1) | **H** | observed |
+| CLI-KPI-1 | overview + memory summary modes (align FAM-1 from memory family) | **H** | observed |
+| CLI-TOP-1 | op_profile convert option `top_ops_limit` without full tree materialization | **H** | hypothesized |
+| CLI-SS-1 | Rely on SMART_SUGGESTION disk cache; never refresh unless asked | **M** | observed |
 
 ---
 
@@ -325,13 +325,13 @@ FE: full PodViewerDatabase → topology + stack bars
 
 | ID | Opportunity | Applies to | Severity | Confidence |
 |----|-------------|------------|----------|------------|
-| X-1 | Stream-combine OpStats (kill `vector<OpStats>`) | pod_viewer, smart_suggestion, any OpStats consumer | **H** | high |
-| X-2 | HLO extract once + instruction index | graph_viewer, memory_viewer, tool_names | **M** | high |
-| X-3 | View modes: `full \| ui \| summary \| cli` on convert | all tools here | **H** | high |
+| X-1 | Stream-combine OpStats (kill `vector<OpStats>`) | pod_viewer, smart_suggestion, any OpStats consumer | **H** | observed |
+| X-2 | HLO extract once + instruction index | graph_viewer, memory_viewer, tool_names | **M** | observed |
+| X-3 | View modes: `full \| ui \| summary \| cli` on convert | all tools here | **H** | observed |
 | X-4 | Cap concurrent converts (02-doc) | inference parallel + foreground UI | **H** | hypothesized |
-| X-5 | Stop `always_print` JSON default | pod_viewer, smart_suggestion | **M** | high |
-| X-6 | Durable tool result cache keyed by options | graph, util, inference, perf | **H** | medium |
-| X-7 | CLI must not force UI-scale protos | UV, KPI, top_hlo, graph long_txt | **H** | high |
+| X-5 | Stop `always_print` JSON default | pod_viewer, smart_suggestion | **M** | observed |
+| X-6 | Durable tool result cache keyed by options | graph, util, inference, perf | **H** | hypothesized |
+| X-7 | CLI must not force UI-scale protos | UV, KPI, top_hlo, graph long_txt | **H** | observed |
 
 ---
 
@@ -339,18 +339,18 @@ FE: full PodViewerDatabase → topology + stack bars
 
 | Rank | ID | Description | Severity | Confidence | Effort |
 |------|-----|-------------|----------|------------|--------|
-| 1 | X-1 / SS-1 / PV-1 | Stream OpStats multi-host combine | **H** | high | L |
-| 2 | GV-2 + GV-7 | Bound graph HTML + default width=1 | **H** | high | S |
-| 3 | UV-1 / CLI-UV-1 | Utilization summary mode for CLI | **H** | high | M |
-| 4 | CLI-TOP-1 / CLI-KPI-1 | Top-ops & KPI without full trees | **H** | high | M |
-| 5 | IP-1 / IP-3 | Inference: sample without retaining all requests | **H** | high | M–L |
-| 6 | SS-2 | Kill ToolDataProvider JSON round-trips | **H** | high | M |
-| 7 | PC-1 | Aggregate perf_counters for default UI | **H** | high | M |
-| 8 | GV-5 | Lazy graph op_profile metrics | **H** | high | M |
-| 9 | GV-1 / X-6 | Disk cache rendered HLO views | **H** | medium | M |
-| 10 | PV-2 | Cap steps in pod merge | **H** | high | S |
-| 11 | IP-2 | Bound inference host parallelism | **H** | high | S |
-| 12 | X-5 | always_print off | **M** | high | S |
+| 1 | X-1 / SS-1 / PV-1 | Stream OpStats multi-host combine | **H** | observed | L |
+| 2 | GV-2 + GV-7 | Bound graph HTML + default width=1 | **H** | observed | S |
+| 3 | UV-1 / CLI-UV-1 | Utilization summary mode for CLI | **H** | observed | M |
+| 4 | CLI-TOP-1 / CLI-KPI-1 | Top-ops & KPI without full trees | **H** | observed | M |
+| 5 | IP-1 / IP-3 | Inference: sample without retaining all requests | **H** | observed | M–L |
+| 6 | SS-2 | Kill ToolDataProvider JSON round-trips | **H** | observed | M |
+| 7 | PC-1 | Aggregate perf_counters for default UI | **H** | observed | M |
+| 8 | GV-5 | Lazy graph op_profile metrics | **H** | observed | M |
+| 9 | GV-1 / X-6 | Disk cache rendered HLO views | **H** | hypothesized | M |
+| 10 | PV-2 | Cap steps in pod merge | **H** | observed | S |
+| 11 | IP-2 | Bound inference host parallelism | **H** | observed | S |
+| 12 | X-5 | always_print off | **M** | observed | S |
 
 ### Top 5 wins
 
@@ -379,12 +379,12 @@ FE: full PodViewerDatabase → topology + stack bars
 
 | Tool | Peak severity | Dominant stage | Confidence |
 |------|---------------|----------------|------------|
-| graph_viewer | **H** | HloModule IR + DOT/HTML; FE op_profile | high |
-| inference_profile | **H** (convert) / **M** (wire) | Parallel XSpace + full request_details | high |
-| utilization_viewer | **M** UI / **H** CLI waste | Per-sample rows; CLI full CSV | high |
-| smart_suggestion | **H** cold | Nested OpStats + side converts | high |
-| perf_counters | **M–H** | Unaggregated multi-host rows | high |
-| pod_viewer | **H** multi-host | OpStats vector + step×core JSON | high |
+| graph_viewer | **H** | HloModule IR + DOT/HTML; FE op_profile | observed |
+| inference_profile | **H** (convert) / **M** (wire) | Parallel XSpace + full request_details | observed |
+| utilization_viewer | **M** UI / **H** CLI waste | Per-sample rows; CLI full CSV | observed |
+| smart_suggestion | **H** cold | Nested OpStats + side converts | observed |
+| perf_counters | **M–H** | Unaggregated multi-host rows | observed |
+| pod_viewer | **H** multi-host | OpStats vector + step×core JSON | observed |
 
 ---
 
